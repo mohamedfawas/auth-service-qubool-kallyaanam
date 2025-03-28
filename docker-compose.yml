@@ -18,11 +18,24 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:alpine
+    container_name: auth-service-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   auth-service:
     build: .
     container_name: auth-service
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       - SERVER_PORT=8080
@@ -33,6 +46,13 @@ services:
       - DB_PASSWORD=postgres
       - DB_NAME=auth_service
       - DB_SSLMODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - OTP_LENGTH=6
+      - OTP_EXPIRY_MINUTES=15
+      - OTP_MAX_ATTEMPTS=3
     ports:
       - "8080:8080"
     restart: unless-stopped

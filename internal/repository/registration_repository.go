@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/google/uuid"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
 )
 
@@ -69,4 +71,32 @@ func (r *GormRegistrationRepository) GetPendingRegistrationByPhone(ctx context.C
 	}
 
 	return &registration, nil
+}
+
+// GetPendingRegistrationByID retrieves a pending registration by ID
+func (r *GormRegistrationRepository) GetPendingRegistrationByID(ctx context.Context, id uuid.UUID) (*models.PendingRegistration, error) {
+	var registration models.PendingRegistration
+
+	// Only get non-expired registrations
+	result := r.db.WithContext(ctx).
+		Where("pending_id = ? AND expires_at > NOW()", id).
+		First(&registration)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, result.Error
+	}
+
+	return &registration, nil
+}
+
+// CleanExpiredRegistrations removes expired registrations
+func (r *GormRegistrationRepository) CleanExpiredRegistrations(ctx context.Context) (int64, error) {
+	result := r.db.WithContext(ctx).
+		Where("expires_at < ?", time.Now().UTC()).
+		Delete(&models.PendingRegistration{})
+
+	return result.RowsAffected, result.Error
 }

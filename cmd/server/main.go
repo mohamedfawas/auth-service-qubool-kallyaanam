@@ -3,12 +3,19 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/api/handlers"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/api/routes"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/config"
+	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
+	redisRepo "github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository/redis"
+	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/postgres"
+	redisClient "github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/redis"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/validator"
 )
 
@@ -31,19 +38,57 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
+	// Connect to Redis
+	redis, err := redisClient.Connect(&cfg.Redis)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to Redis: %v", err)
+		log.Println("Continuing without Redis - rate limiting will be disabled")
+		redis = nil
+	}
+
+	// Create repositories
+	userRepo := repository.NewUserRepository(db)
+	regRepo := repository.NewRegistrationRepository(db)
+	otpRepo := repository.NewOTPRepository(db)
+
+	var rateLimitRepo repository.RateLimitRepository
+	if redis != nil {
+		rateLimitRepo = redisRepo.NewRateLimitRepository(redis)
+	}
+
+	// Create services
+	otpService := service.NewOTPService(otpRepo, regRepo, rateLimitRepo, &cfg.OTP)
+	authService := service.NewAuthService(userRepo, regRepo, otpService)
+	cleanupService := service.NewCleanupService(otpService)
+
+	// Start cleanup jobs
+	cleanupService.StartCleanupJobs()
+	defer cleanupService.StopCleanupJobs()
+
 	// Create router
 	router := gin.Default()
 
 	// Create handlers
-	authHandler := handlers.NewAuthHandler(db)
+	authHandler := handlers.NewAuthHandler(db, authService, otpService)
 
 	// Setup routes
 	routes.Setup(router, authHandler)
 
-	// Start server
+	// Setup graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start server in a goroutine
 	serverAddr := fmt.Sprintf(":%s", cfg.Server.Port)
 	log.Printf("Starting server on %s", serverAddr)
-	if err := router.Run(serverAddr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
+
+	go func() {
+		if err := router.Run(serverAddr); err != nil {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	<-quit
+	log.Println("Shutting down server...")
 }

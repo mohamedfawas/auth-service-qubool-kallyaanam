@@ -12,6 +12,8 @@ import (
 type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
+	Redis    RedisConfig
+	OTP      OTPConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -30,10 +32,32 @@ type DatabaseConfig struct {
 	SSLMode  string
 }
 
+// RedisConfig holds Redis configuration
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
+}
+
+// OTPConfig holds OTP configuration
+type OTPConfig struct {
+	Length         int
+	ExpiryMinutes  int
+	MaxAttempts    int
+	EmailOTPPrefix string
+	PhoneOTPPrefix string
+}
+
 // Load loads the configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists
 	_ = godotenv.Load()
+
+	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
+	otpLength, _ := strconv.Atoi(getEnv("OTP_LENGTH", "6"))
+	otpExpiryMinutes, _ := strconv.Atoi(getEnv("OTP_EXPIRY_MINUTES", "15"))
+	otpMaxAttempts, _ := strconv.Atoi(getEnv("OTP_MAX_ATTEMPTS", "3"))
 
 	config := &Config{
 		Server: ServerConfig{
@@ -48,6 +72,19 @@ func Load() (*Config, error) {
 			DBName:   getEnv("DB_NAME", "auth_service"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
+		Redis: RedisConfig{
+			Host:     getEnv("REDIS_HOST", "localhost"),
+			Port:     getEnv("REDIS_PORT", "6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       redisDB,
+		},
+		OTP: OTPConfig{
+			Length:         otpLength,
+			ExpiryMinutes:  otpExpiryMinutes,
+			MaxAttempts:    otpMaxAttempts,
+			EmailOTPPrefix: "email_otp:",
+			PhoneOTPPrefix: "phone_otp:",
+		},
 	}
 
 	return config, nil
@@ -57,6 +94,11 @@ func Load() (*Config, error) {
 func (c *DatabaseConfig) DSN() string {
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		c.Host, c.Port, c.User, c.Password, c.DBName, c.SSLMode)
+}
+
+// RedisAddr returns the Redis address (host:port)
+func (c *RedisConfig) RedisAddr() string {
+	return fmt.Sprintf("%s:%s", c.Host, c.Port)
 }
 
 // Helper function to get environment variables
