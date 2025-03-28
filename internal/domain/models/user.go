@@ -38,6 +38,7 @@ type User struct {
 	Phone        string         `gorm:"uniqueIndex;size:15;not null" json:"phone"`
 	PasswordHash []byte         `gorm:"not null" json:"-"`
 	Blocked      bool           `gorm:"default:false" json:"blocked"`
+	IsDeleted    bool           `gorm:"default:false" json:"is_deleted"`
 	LastLogin    *time.Time     `json:"last_login,omitempty"`
 	CreatedAt    time.Time      `gorm:"default:now()" json:"created_at"`
 	UpdatedAt    time.Time      `gorm:"default:now()" json:"updated_at"`

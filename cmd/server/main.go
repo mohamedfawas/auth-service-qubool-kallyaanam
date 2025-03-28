@@ -9,6 +9,7 @@ import (
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/api/routes"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/config"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/postgres"
+	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/validator"
 )
 
 func main() {
@@ -20,6 +21,9 @@ func main() {
 
 	// Set Gin mode
 	gin.SetMode(cfg.Server.Mode)
+
+	// Setup validation
+	validator.Setup()
 
 	// Connect to database
 	db, err := postgres.Connect(cfg)
