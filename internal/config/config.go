@@ -1,44 +1,65 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 
 	"github.com/joho/godotenv"
 )
 
-// Config holds all configuration for the application
+// Config holds all configuration for the server
 type Config struct {
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPassword string
-	DBName     string
-	DBSSLMode  string
-
-	// Server configuration
-	ServerPort string
-
-	// Redis configuration
-	RedisHost     string
-	RedisPort     string
-	RedisPassword string
-	RedisDB       int
-
-	// Email configuration
-	EmailHost     string
-	EmailPort     string
-	EmailUsername string
-	EmailPassword string
-	EmailFrom     string
-
-	// SMS configuration
-	SMSProviderID    string
-	SMSProviderToken string
-	SMSProviderFrom  string
+	Server   ServerConfig
+	Database DatabaseConfig
 }
 
-// getEnv gets environment variable or returns default value
+// ServerConfig holds server-specific configuration
+type ServerConfig struct {
+	Port string
+	Mode string
+}
+
+// DatabaseConfig holds database configuration
+type DatabaseConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
+}
+
+// Load loads the configuration from environment variables
+func Load() (*Config, error) {
+	// Load .env file if it exists
+	_ = godotenv.Load()
+
+	config := &Config{
+		Server: ServerConfig{
+			Port: getEnv("SERVER_PORT", "8080"),
+			Mode: getEnv("GIN_MODE", "debug"),
+		},
+		Database: DatabaseConfig{
+			Host:     getEnv("DB_HOST", "localhost"),
+			Port:     getEnv("DB_PORT", "5432"),
+			User:     getEnv("DB_USER", "postgres"),
+			Password: getEnv("DB_PASSWORD", "postgres"),
+			DBName:   getEnv("DB_NAME", "auth_service"),
+			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+		},
+	}
+
+	return config, nil
+}
+
+// DSN returns the PostgreSQL connection string
+func (c *DatabaseConfig) DSN() string {
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		c.Host, c.Port, c.User, c.Password, c.DBName, c.SSLMode)
+}
+
+// Helper function to get environment variables
 func getEnv(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
@@ -47,42 +68,12 @@ func getEnv(key, defaultValue string) string {
 	return value
 }
 
-// LoadConfig loads configuration from environment variables
-func LoadConfig() (*Config, error) {
-	// Load .env file if it exists
-	godotenv.Load()
-
-	// Parse Redis DB number
-	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
-
-	return &Config{
-		// Database config
-		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "postgres"),
-		DBName:     getEnv("DB_NAME", "qubool_kallyaanam"),
-		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
-
-		// Server config
-		ServerPort: getEnv("SERVER_PORT", "8080"),
-
-		// Redis config
-		RedisHost:     getEnv("REDIS_HOST", "localhost"),
-		RedisPort:     getEnv("REDIS_PORT", "6379"),
-		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		RedisDB:       redisDB,
-
-		// Email config
-		EmailHost:     getEnv("EMAIL_HOST", "smtp.gmail.com"),
-		EmailPort:     getEnv("EMAIL_PORT", "587"),
-		EmailUsername: getEnv("EMAIL_USERNAME", ""),
-		EmailPassword: getEnv("EMAIL_PASSWORD", ""),
-		EmailFrom:     getEnv("EMAIL_FROM", "noreply@quboolkallyaanam.com"),
-
-		// SMS config
-		SMSProviderID:    getEnv("SMS_PROVIDER_ID", ""),
-		SMSProviderToken: getEnv("SMS_PROVIDER_TOKEN", ""),
-		SMSProviderFrom:  getEnv("SMS_PROVIDER_FROM", "QuboolK"),
-	}, nil
+// Get environment variable as bool
+func getEnvAsBool(key string, defaultValue bool) bool {
+	valueStr := getEnv(key, strconv.FormatBool(defaultValue))
+	value, err := strconv.ParseBool(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+	return value
 }
