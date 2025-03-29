@@ -51,7 +51,6 @@ func main() {
 	// Connect to Redis
 	var redis *redis.Client
 	var rateLimitRepo repository.RateLimitRepository
-	var sessionRepo repository.SessionRepository
 
 	redis, err = redisClient.Connect(&cfg.Redis)
 	if err != nil {
@@ -59,7 +58,7 @@ func main() {
 		log.Println("Continuing without Redis - rate limiting and session management will be disabled")
 	} else {
 		rateLimitRepo = redisRepo.NewRateLimitRepository(redis)
-		sessionRepo = redisRepo.NewSessionRepository(redis)
+
 	}
 	// Create repositories
 	userRepo := repository.NewUserRepository(db)
@@ -77,7 +76,7 @@ func main() {
 	defer cleanupService.StopCleanupJobs()
 
 	// Create handlers
-	authHandler := handlers.NewAuthHandler(db, authService, otpService, redis, sessionRepo, tokenService)
+	authHandler := handlers.NewAuthHandler(db, authService, otpService, redis, tokenService)
 
 	// Create router with default logger and recovery middleware
 	router := gin.New()

@@ -12,20 +12,10 @@ import (
 // Update the Setup function to register the new validator
 func Setup() {
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
-		// Register custom validation for phone number in E.164 format
-		v.RegisterValidation("e164", validateE164)
 
 		// Register custom validation for password strength
 		v.RegisterValidation("strongpassword", validatePasswordStrength)
 	}
-}
-
-// validateE164 validates if a string is a valid E.164 phone number
-func validateE164(fl validator.FieldLevel) bool {
-	phoneNumber := fl.Field().String()
-	// E.164 format: + followed by 1-15 digits
-	re := regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
-	return re.MatchString(phoneNumber)
 }
 
 // FormatValidationErrors converts validator errors into a user-friendly format

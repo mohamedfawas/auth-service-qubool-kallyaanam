@@ -11,7 +11,6 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
-	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/response"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/validator"
@@ -24,25 +23,22 @@ type AuthHandler struct {
 	authService  *service.AuthService
 	otpService   *service.OTPService
 	redisClient  *redis.Client
-	sessionRepo  repository.SessionRepository
-	tokenService *service.TokenService // Add this field
+	tokenService *service.TokenService
 }
 
-// NewAuthHandler creates a new auth handler
+// Update constructor to remove sessionRepo parameter
 func NewAuthHandler(
 	db *gorm.DB,
 	authService *service.AuthService,
 	otpService *service.OTPService,
 	redisClient *redis.Client,
-	sessionRepo repository.SessionRepository,
-	tokenService *service.TokenService, // Add this parameter
+	tokenService *service.TokenService,
 ) *AuthHandler {
 	return &AuthHandler{
 		db:           db,
 		authService:  authService,
 		otpService:   otpService,
 		redisClient:  redisClient,
-		sessionRepo:  sessionRepo,
 		tokenService: tokenService,
 	}
 }
@@ -112,26 +108,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		// Continue with the registration even if OTP generation fails
 	}
 
-	// Session-based approach (for backward compatibility during transition)
-	if h.sessionRepo != nil {
-		sessionID := uuid.New().String()
-		expiry := time.Until(resp.ExpiresAt)
-		err = h.sessionRepo.StoreSession(c.Request.Context(), sessionID, resp.PendingID.String(), expiry)
-		if err != nil {
-			log.Printf("Failed to store session: %v", err)
-		} else {
-			c.SetCookie(
-				"registration_session",
-				sessionID,
-				int(expiry.Seconds()),
-				"/",
-				"",
-				c.Request.TLS != nil,
-				true,
-			)
-		}
-	}
-
 	// JWT-based approach (new method)
 	if h.tokenService != nil {
 		// Generate JWT token
@@ -189,7 +165,7 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		return
 	}
 
-	// If pendingID is not provided, try JWT token first
+	// If pendingID is not provided, try JWT token
 	if req.PendingID == uuid.Nil && h.tokenService != nil {
 		// Try to get token from cookie
 		token, err := c.Cookie(h.tokenService.GetCookieName())
@@ -201,21 +177,6 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 				log.Printf("Retrieved pendingID %s from JWT token", pendingID)
 			} else {
 				log.Printf("Failed to parse JWT token: %v", err)
-			}
-		}
-	}
-
-	// If still nil, fallback to session cookie (during transition period)
-	if req.PendingID == uuid.Nil && h.sessionRepo != nil {
-		sessionID, err := c.Cookie("registration_session")
-		if err == nil && sessionID != "" {
-			pendingIDStr, err := h.sessionRepo.GetSession(c.Request.Context(), sessionID)
-			if err == nil && pendingIDStr != "" {
-				pendingID, err := uuid.Parse(pendingIDStr)
-				if err == nil {
-					req.PendingID = pendingID
-					log.Printf("Retrieved pendingID %s from session cookie", pendingID)
-				}
 			}
 		}
 	}
@@ -298,7 +259,7 @@ func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
 		return
 	}
 
-	// If pendingID is not provided, try JWT token first
+	// If pendingID is not provided, try JWT token
 	if req.PendingID == uuid.Nil && h.tokenService != nil {
 		token, err := c.Cookie(h.tokenService.GetCookieName())
 		if err == nil && token != "" {
@@ -306,21 +267,6 @@ func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
 			if err == nil {
 				req.PendingID = pendingID
 				log.Printf("Retrieved pendingID %s from JWT token", pendingID)
-			}
-		}
-	}
-
-	// Fallback to session cookie if needed
-	if req.PendingID == uuid.Nil && h.sessionRepo != nil {
-		sessionID, err := c.Cookie("registration_session")
-		if err == nil && sessionID != "" {
-			pendingIDStr, err := h.sessionRepo.GetSession(c.Request.Context(), sessionID)
-			if err == nil && pendingIDStr != "" {
-				pendingID, err := uuid.Parse(pendingIDStr)
-				if err == nil {
-					req.PendingID = pendingID
-					log.Printf("Retrieved pendingID %s from session cookie", pendingID)
-				}
 			}
 		}
 	}
@@ -358,15 +304,6 @@ func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
 
 		response.Error(c, statusCode, errorMessage, err.Error())
 		return
-	}
-
-	// Clear all session information after successful registration
-	if h.sessionRepo != nil {
-		sessionID, err := c.Cookie("registration_session")
-		if err == nil && sessionID != "" {
-			h.sessionRepo.DeleteSession(c.Request.Context(), sessionID)
-			c.SetCookie("registration_session", "", -1, "/", "", c.Request.TLS != nil, true)
-		}
 	}
 
 	// Clear JWT token cookies
