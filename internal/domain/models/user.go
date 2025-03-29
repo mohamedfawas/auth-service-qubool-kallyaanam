@@ -62,7 +62,7 @@ type RegisterResponse struct {
 
 // VerifyOTPRequest represents the request to verify an OTP
 type VerifyOTPRequest struct {
-	PendingID uuid.UUID `json:"pending_id" binding:"required"`
+	PendingID uuid.UUID `json:"pending_id"` // Remove the binding:"required" to make it optional
 	OTPType   string    `json:"otp_type" binding:"required,oneof=email phone"`
 	OTPValue  string    `json:"otp_value" binding:"required,len=6"`
 }
@@ -77,7 +77,7 @@ type VerifyOTPResponse struct {
 
 // CompleteRegistrationRequest represents the request to complete registration
 type CompleteRegistrationRequest struct {
-	PendingID uuid.UUID `json:"pending_id" binding:"required"`
+	PendingID uuid.UUID `json:"pending_id"` // Remove binding:"required"
 }
 
 // CompleteRegistrationResponse represents the response after completing registration

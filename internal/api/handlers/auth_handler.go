@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
+	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/response"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/validator"
@@ -16,15 +20,21 @@ import (
 
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
+	db          *gorm.DB
 	authService *service.AuthService
 	otpService  *service.OTPService
+	redisClient *redis.Client
+	sessionRepo repository.SessionRepository
 }
 
 // NewAuthHandler creates a new auth handler
-func NewAuthHandler(db *gorm.DB, authService *service.AuthService, otpService *service.OTPService) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, authService *service.AuthService, otpService *service.OTPService, redisClient *redis.Client, sessionRepo repository.SessionRepository) *AuthHandler {
 	return &AuthHandler{
+		db:          db,
 		authService: authService,
 		otpService:  otpService,
+		redisClient: redisClient,
+		sessionRepo: sessionRepo,
 	}
 }
 
@@ -93,6 +103,33 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		// In a production environment, you might want to handle this differently
 	}
 
+	// Create session and set cookie if Redis is available
+	if h.sessionRepo != nil {
+		// Generate unique session ID
+		sessionID := uuid.New().String()
+
+		// Store in Redis with same expiry as registration
+		expiry := time.Until(resp.ExpiresAt)
+		err = h.sessionRepo.StoreSession(c.Request.Context(), sessionID, resp.PendingID.String(), expiry)
+		if err != nil {
+			log.Printf("Failed to store session: %v", err)
+			// Continue anyway - user will need to use pendingID
+		} else {
+			// Set cookie with session ID
+			c.SetCookie(
+				"registration_session",
+				sessionID,
+				int(expiry.Seconds()),
+				"/",
+				"",                   // Use appropriate domain in production
+				c.Request.TLS != nil, // Secure if HTTPS
+				true,                 // HTTP only
+			)
+
+			log.Printf("Session cookie set for pendingID: %s", resp.PendingID)
+		}
+	}
+
 	// Return successful response
 	response.Success(c, http.StatusCreated, "Registration initiated successfully. Please verify your email and phone.", resp)
 }
@@ -105,6 +142,30 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		validationErrors := validator.FormatValidationErrors(err)
 		response.Error(c, http.StatusBadRequest, "Invalid request data", validationErrors)
+		return
+	}
+
+	// If pendingID is not provided, try to get it from session cookie
+	if req.PendingID == uuid.Nil && h.sessionRepo != nil {
+		// Get session cookie
+		sessionID, err := c.Cookie("registration_session")
+		if err == nil && sessionID != "" {
+			// Retrieve pendingID from session
+			pendingIDStr, err := h.sessionRepo.GetSession(c.Request.Context(), sessionID)
+			if err == nil && pendingIDStr != "" {
+				pendingID, err := uuid.Parse(pendingIDStr)
+				if err == nil {
+					req.PendingID = pendingID
+					log.Printf("Retrieved pendingID %s from session cookie", pendingID)
+				}
+			}
+		}
+	}
+
+	// If still nil, return error
+	if req.PendingID == uuid.Nil {
+		response.Error(c, http.StatusBadRequest, "Missing registration ID",
+			"Either provide pendingID in request body or use the same browser/device where registration was initiated")
 		return
 	}
 
@@ -164,6 +225,30 @@ func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
 		return
 	}
 
+	// If pendingID is not provided, try to get it from session cookie
+	if req.PendingID == uuid.Nil && h.sessionRepo != nil {
+		// Get session cookie
+		sessionID, err := c.Cookie("registration_session")
+		if err == nil && sessionID != "" {
+			// Retrieve pendingID from session
+			pendingIDStr, err := h.sessionRepo.GetSession(c.Request.Context(), sessionID)
+			if err == nil && pendingIDStr != "" {
+				pendingID, err := uuid.Parse(pendingIDStr)
+				if err == nil {
+					req.PendingID = pendingID
+					log.Printf("Retrieved pendingID %s from session cookie", pendingID)
+				}
+			}
+		}
+	}
+
+	// If still nil, return error
+	if req.PendingID == uuid.Nil {
+		response.Error(c, http.StatusBadRequest, "Missing registration ID",
+			"Either provide pendingID in request body or use the same browser/device where registration was initiated")
+		return
+	}
+
 	// Complete registration
 	resp, err := h.authService.CompleteRegistration(c.Request.Context(), req.PendingID)
 
@@ -190,6 +275,16 @@ func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
 
 		response.Error(c, statusCode, errorMessage, err.Error())
 		return
+	}
+
+	// After successful registration completion, clear the session cookie
+	if h.sessionRepo != nil {
+		sessionID, err := c.Cookie("registration_session")
+		if err == nil && sessionID != "" {
+			h.sessionRepo.DeleteSession(c.Request.Context(), sessionID)
+			// Clear the cookie
+			c.SetCookie("registration_session", "", -1, "/", "", c.Request.TLS != nil, true)
+		}
 	}
 
 	// Return successful response

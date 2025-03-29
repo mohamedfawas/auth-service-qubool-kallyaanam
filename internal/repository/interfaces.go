@@ -70,3 +70,15 @@ type RateLimitRepository interface {
 	// ResetCounter resets a rate limit counter
 	ResetCounter(ctx context.Context, key string) error
 }
+
+// SessionRepository defines the interface for session management
+type SessionRepository interface {
+	// StoreSession stores a mapping between a session ID and a pending registration ID
+	StoreSession(ctx context.Context, sessionID string, pendingID string, expiry time.Duration) error
+
+	// GetSession retrieves a pending registration ID by session ID
+	GetSession(ctx context.Context, sessionID string) (string, error)
+
+	// DeleteSession removes a session
+	DeleteSession(ctx context.Context, sessionID string) error
+}

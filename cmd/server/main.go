@@ -51,15 +51,16 @@ func main() {
 	// Connect to Redis
 	var redis *redis.Client
 	var rateLimitRepo repository.RateLimitRepository
+	var sessionRepo repository.SessionRepository
 
 	redis, err = redisClient.Connect(&cfg.Redis)
 	if err != nil {
 		log.Printf("Warning: Failed to connect to Redis: %v", err)
-		log.Println("Continuing without Redis - rate limiting will be disabled")
+		log.Println("Continuing without Redis - rate limiting and session management will be disabled")
 	} else {
 		rateLimitRepo = redisRepo.NewRateLimitRepository(redis)
+		sessionRepo = redisRepo.NewSessionRepository(redis)
 	}
-
 	// Create repositories
 	userRepo := repository.NewUserRepository(db)
 	regRepo := repository.NewRegistrationRepository(db)
@@ -75,7 +76,7 @@ func main() {
 	defer cleanupService.StopCleanupJobs()
 
 	// Create handlers
-	authHandler := handlers.NewAuthHandler(db, authService, otpService)
+	authHandler := handlers.NewAuthHandler(db, authService, otpService, redis, sessionRepo)
 
 	// Create router with default logger and recovery middleware
 	router := gin.New()
@@ -101,13 +102,6 @@ func main() {
 
 	healthHandler := handlers.NewHealthHandler(db, redis)
 	router.GET("/health", healthHandler.Health)
-
-	// Health check route (outside auth group to avoid rate limiting)
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status": "ok",
-		})
-	})
 
 	// Setup graceful shutdown
 	quit := make(chan os.Signal, 1)
