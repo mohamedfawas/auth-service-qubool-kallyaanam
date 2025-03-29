@@ -23,6 +23,7 @@ var (
 	ErrEmailNotVerified   = errors.New("email not verified")
 	ErrPhoneNotVerified   = errors.New("phone not verified")
 	ErrCreateUser         = errors.New("failed to create user")
+	ErrSessionNotFound    = errors.New("session not found or expired")
 )
 
 // AuthService handles authentication business logic

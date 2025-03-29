@@ -54,7 +54,6 @@ type RegisterRequest struct {
 
 // RegisterResponse represents the response sent back to the client
 type RegisterResponse struct {
-	PendingID uuid.UUID `json:"pending_id,omitempty"`
 	Email     string    `json:"email,omitempty"`
 	Phone     string    `json:"phone,omitempty"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
@@ -69,10 +68,9 @@ type VerifyOTPRequest struct {
 
 // VerifyOTPResponse represents the response after OTP verification
 type VerifyOTPResponse struct {
-	PendingID uuid.UUID `json:"pending_id"`
-	OTPType   string    `json:"otp_type"`
-	Verified  bool      `json:"verified"`
-	Message   string    `json:"message"`
+	OTPType  string `json:"otp_type"`
+	Verified bool   `json:"verified"`
+	Message  string `json:"message"`
 }
 
 // CompleteRegistrationRequest represents the request to complete registration

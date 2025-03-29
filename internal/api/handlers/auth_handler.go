@@ -51,6 +51,7 @@ func NewAuthHandler(db *gorm.DB, authService *service.AuthService, otpService *s
 // @Failure 500 {object} response.Response{error=string} "Server error"
 // @Router /auth/register [post]
 // Register handles the user registration endpoint
+// Register handles the user registration endpoint
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.RegisterRequest
 
@@ -100,7 +101,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if err != nil {
 		log.Printf("Failed to generate OTPs: %v", err)
 		// Continue with the registration even if OTP generation fails
-		// In a production environment, you might want to handle this differently
 	}
 
 	// Create session and set cookie if Redis is available
@@ -113,7 +113,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		err = h.sessionRepo.StoreSession(c.Request.Context(), sessionID, resp.PendingID.String(), expiry)
 		if err != nil {
 			log.Printf("Failed to store session: %v", err)
-			// Continue anyway - user will need to use pendingID
+			// Continue anyway - but registration will be harder to complete
 		} else {
 			// Set cookie with session ID
 			c.SetCookie(
@@ -130,8 +130,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 	}
 
-	// Return successful response
-	response.Success(c, http.StatusCreated, "Registration initiated successfully. Please verify your email and phone.", resp)
+	// Return successful response without pendingID
+	cleanResp := &models.RegisterResponse{
+		Email:     resp.Email,
+		Phone:     resp.Phone,
+		ExpiresAt: resp.ExpiresAt,
+	}
+
+	response.Success(c, http.StatusCreated, "Registration initiated successfully. Please verify your email and phone.", cleanResp)
 }
 
 // VerifyOTP handles the OTP verification endpoint
@@ -162,10 +168,10 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		}
 	}
 
-	// If still nil, return error
+	// If still nil, return more user-friendly error
 	if req.PendingID == uuid.Nil {
-		response.Error(c, http.StatusBadRequest, "Missing registration ID",
-			"Either provide pendingID in request body or use the same browser/device where registration was initiated")
+		response.Error(c, http.StatusBadRequest, "Session not found",
+			"Please use the same browser/device where you started registration or restart the registration process")
 		return
 	}
 
@@ -203,12 +209,11 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		return
 	}
 
-	// Return success response
+	// Return success response without pendingID
 	resp := models.VerifyOTPResponse{
-		PendingID: req.PendingID,
-		OTPType:   req.OTPType,
-		Verified:  true,
-		Message:   fmt.Sprintf("%s verified successfully", req.OTPType),
+		OTPType:  req.OTPType,
+		Verified: true,
+		Message:  fmt.Sprintf("%s verified successfully", req.OTPType),
 	}
 
 	response.Success(c, http.StatusOK, "OTP verified successfully", resp)
@@ -242,10 +247,10 @@ func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
 		}
 	}
 
-	// If still nil, return error
+	// If still nil, return improved error
 	if req.PendingID == uuid.Nil {
-		response.Error(c, http.StatusBadRequest, "Missing registration ID",
-			"Either provide pendingID in request body or use the same browser/device where registration was initiated")
+		response.Error(c, http.StatusBadRequest, "Session not found",
+			"Please use the same browser/device where you started registration or restart the registration process")
 		return
 	}
 
