@@ -13,12 +13,6 @@ type UserRepository interface {
 	// CheckUserExists checks if a user with the given email or phone exists
 	CheckUserExists(ctx context.Context, email, phone string) (bool, string, error)
 
-	// GetUserByEmail retrieves a user by their email
-	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
-
-	// GetUserByPhone retrieves a user by their phone number
-	GetUserByPhone(ctx context.Context, phone string) (*models.User, error)
-
 	// CreateUser creates a new user
 	CreateUser(ctx context.Context, user *models.User) error
 }

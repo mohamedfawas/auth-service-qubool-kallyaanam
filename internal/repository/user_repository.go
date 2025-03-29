@@ -42,36 +42,6 @@ func (r *GormUserRepository) CheckUserExists(ctx context.Context, email, phone s
 	return false, "", nil
 }
 
-// GetUserByEmail retrieves a user by their email
-func (r *GormUserRepository) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
-	var user models.User
-
-	result := r.db.WithContext(ctx).Where("LOWER(email) = LOWER(?) AND deleted_at IS NULL", email).First(&user)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, result.Error
-	}
-
-	return &user, nil
-}
-
-// GetUserByPhone retrieves a user by their phone number
-func (r *GormUserRepository) GetUserByPhone(ctx context.Context, phone string) (*models.User, error) {
-	var user models.User
-
-	result := r.db.WithContext(ctx).Where("phone = ? AND deleted_at IS NULL", phone).First(&user)
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, result.Error
-	}
-
-	return &user, nil
-}
-
 // CreateUser creates a new user
 func (r *GormUserRepository) CreateUser(ctx context.Context, user *models.User) error {
 	result := r.db.WithContext(ctx).Create(user)

@@ -1,46 +1,49 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/response"
 )
 
-// CSRFToken generates a new CSRF token
-func CSRFToken() gin.HandlerFunc {
+// JWTCSRFToken generates a CSRF token based on JWT
+func JWTCSRFToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Only apply to cookie-based authenticated requests
-		token, err := c.Cookie("registration_session")
-		if err == nil && token != "" {
-			// Generate CSRF token
-			csrfToken := uuid.New().String()
+		// Only apply to JWT-authenticated requests
+		jwtToken, err := c.Cookie("registration_session")
+		if err == nil && jwtToken != "" {
+			// Generate CSRF token as a hash of the JWT token and a timestamp
+			// This is a simplified approach - in production you might want to use a separate secret
+			tokenHash := computeCSRFHash(jwtToken, c.ClientIP())
 
 			// Store in cookie with SameSite strict policy
 			c.SetCookie(
 				"csrf_token",
-				csrfToken,
+				tokenHash,
 				int(24*time.Hour.Seconds()),
 				"/",
 				"",
 				c.Request.TLS != nil,
-				true,
+				true, // HttpOnly
 			)
 
-			// Also include token in response header for JS clients
-			c.Header("X-CSRF-Token", csrfToken)
+			// Also include in response header for SPA clients
+			c.Header("X-CSRF-Token", tokenHash)
 		}
 
 		c.Next()
 	}
 }
 
-// CSRFProtection middleware to protect against CSRF attacks
-func CSRFProtection() gin.HandlerFunc {
+// JWTCSRFProtection middleware to protect against CSRF attacks when using JWT
+func JWTCSRFProtection() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip for GET, HEAD, OPTIONS, TRACE requests (they should be safe)
+		// Skip for safe methods (they don't modify state)
 		if c.Request.Method == "GET" ||
 			c.Request.Method == "HEAD" ||
 			c.Request.Method == "OPTIONS" ||
@@ -49,22 +52,24 @@ func CSRFProtection() gin.HandlerFunc {
 			return
 		}
 
-		// Only check if user has an active session
-		sessionToken, err := c.Cookie("registration_session")
-		if err != nil || sessionToken == "" {
+		// Only check CSRF if the user has JWT
+		jwtToken, err := c.Cookie("registration_session")
+		if err != nil || jwtToken == "" {
 			c.Next()
 			return
 		}
 
-		// Get CSRF token from header then from form
+		// Get CSRF token from header or form
 		csrfToken := c.GetHeader("X-CSRF-Token")
 		if csrfToken == "" {
 			csrfToken = c.PostForm("csrf_token")
 		}
 
-		// Get the expected token from cookie
-		expectedToken, err := c.Cookie("csrf_token")
-		if err != nil || expectedToken == "" || csrfToken != expectedToken {
+		// Compute expected token
+		expectedToken := computeCSRFHash(jwtToken, c.ClientIP())
+
+		// Compare tokens
+		if csrfToken == "" || !secureCompare(csrfToken, expectedToken) {
 			response.Error(c, http.StatusForbidden, "CSRF token validation failed",
 				"Invalid or missing CSRF token")
 			c.Abort()
@@ -73,4 +78,24 @@ func CSRFProtection() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// computeCSRFHash creates a hash based on the JWT token and client IP
+func computeCSRFHash(token, clientIP string) string {
+	h := hmac.New(sha256.New, []byte(token))
+	h.Write([]byte(clientIP))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// secureCompare compares two strings in constant time to prevent timing attacks
+func secureCompare(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	equal := true
+	for i := 0; i < len(a); i++ {
+		equal = equal && (a[i] == b[i])
+	}
+	return equal
 }

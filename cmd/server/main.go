@@ -86,7 +86,7 @@ func main() {
 	router.Use(middleware.Logger())
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.CORS())
-	router.Use(middleware.CSRFToken())
+	router.Use(middleware.JWTCSRFToken())
 
 	// Setup routes
 	auth := router.Group("/auth")
@@ -97,7 +97,7 @@ func main() {
 	}
 
 	// Apply CSRF protection to all non-GET auth endpoints
-	auth.Use(middleware.CSRFProtection())
+	auth.Use(middleware.JWTCSRFProtection())
 
 	// Set up routes with the auth group
 	auth.POST("/register", authHandler.Register)
