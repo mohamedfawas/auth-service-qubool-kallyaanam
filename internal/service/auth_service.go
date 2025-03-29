@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
+	appErrors "github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -51,7 +52,7 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 	// Check if user already exists in users table
 	exists, field, err := s.userRepo.CheckUserExists(ctx, req.Email, req.Phone)
 	if err != nil {
-		return nil, ErrDatabaseOperation
+		return nil, appErrors.Wrap(err, "failed to check user existence")
 	}
 	if exists {
 		if field == "email" {
@@ -63,7 +64,7 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 	// Check for existing pending registration with same email
 	pendingByEmail, err := s.registrationRepo.GetPendingRegistrationByEmail(ctx, req.Email)
 	if err != nil {
-		return nil, ErrDatabaseOperation
+		return nil, appErrors.Wrap(err, "failed to check pending registration by email")
 	}
 	if pendingByEmail != nil {
 		return nil, ErrPendingEmailExists
@@ -72,7 +73,7 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 	// Check for existing pending registration with same phone
 	pendingByPhone, err := s.registrationRepo.GetPendingRegistrationByPhone(ctx, req.Phone)
 	if err != nil {
-		return nil, ErrDatabaseOperation
+		return nil, appErrors.Wrap(err, "failed to check pending registration by phone")
 	}
 	if pendingByPhone != nil {
 		return nil, ErrPendingPhoneExists
@@ -81,7 +82,7 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 	// Hash password
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, ErrPasswordEncryption
+		return nil, appErrors.Wrap(err, "failed to hash password")
 	}
 
 	// Create pending registration
@@ -100,11 +101,8 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 	}
 
 	if err := s.registrationRepo.CreatePendingRegistration(ctx, pendingReg); err != nil {
-		return nil, ErrDatabaseOperation
+		return nil, appErrors.Wrap(err, "failed to create pending registration")
 	}
-
-	// OTPs will be generated in the handler using otpService.GenerateAndLogOTPs
-	// No need to generate them here
 
 	// Return response
 	resp := &models.RegisterResponse{

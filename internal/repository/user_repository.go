@@ -3,10 +3,13 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
+	appErrors "github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/errors"
 )
 
 // GormUserRepository implements the UserRepository interface using GORM
@@ -28,7 +31,7 @@ func (r *GormUserRepository) CheckUserExists(ctx context.Context, email, phone s
 	if result.Error == nil {
 		return true, "email", nil
 	} else if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return false, "", result.Error
+		return false, "", appErrors.WrapWithType(result.Error, appErrors.ErrDatabase, "database error checking email existence")
 	}
 
 	// Check phone
@@ -45,5 +48,21 @@ func (r *GormUserRepository) CheckUserExists(ctx context.Context, email, phone s
 // CreateUser creates a new user
 func (r *GormUserRepository) CreateUser(ctx context.Context, user *models.User) error {
 	result := r.db.WithContext(ctx).Create(user)
-	return result.Error
+	if result.Error != nil {
+		// Check for specific database errors
+		if isDuplicateKeyError(result.Error) {
+			return appErrors.WrapWithType(result.Error, appErrors.ErrDuplicate,
+				fmt.Sprintf("user with email %s or phone %s already exists", user.Email, user.Phone))
+		}
+		return appErrors.WrapWithType(result.Error, appErrors.ErrDatabase, "failed to create user")
+	}
+	return nil
+}
+
+// Helper function to check for duplicate key errors
+// Note: The exact implementation depends on your database driver
+func isDuplicateKeyError(err error) bool {
+	return strings.Contains(err.Error(), "duplicate key") ||
+		strings.Contains(err.Error(), "Duplicate entry") ||
+		strings.Contains(err.Error(), "unique constraint")
 }
