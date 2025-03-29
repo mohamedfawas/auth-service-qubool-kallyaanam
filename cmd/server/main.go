@@ -1,3 +1,11 @@
+// @title Auth Service API
+// @version 1.0
+// @description Authentication service for Qubool Kallyaanam
+// @contact.name API Support
+// @contact.email support@example.com
+// @host localhost:8080
+// @BasePath /
+// @schemes http https
 package main
 
 import (
@@ -88,6 +96,11 @@ func main() {
 
 	// Set up routes with the auth group
 	auth.POST("/register", authHandler.Register)
+	auth.POST("/verify-otp", authHandler.VerifyOTP)
+	auth.POST("/complete-registration", authHandler.CompleteRegistration)
+
+	healthHandler := handlers.NewHealthHandler(db, redis)
+	router.GET("/health", healthHandler.Health)
 
 	// Health check route (outside auth group to avoid rate limiting)
 	router.GET("/health", func(c *gin.Context) {

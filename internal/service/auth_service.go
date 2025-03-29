@@ -20,6 +20,9 @@ var (
 	ErrPendingPhoneExists = errors.New("phone already has a pending registration")
 	ErrPasswordEncryption = errors.New("failed to encrypt password")
 	ErrDatabaseOperation  = errors.New("database operation failed")
+	ErrEmailNotVerified   = errors.New("email not verified")
+	ErrPhoneNotVerified   = errors.New("phone not verified")
+	ErrCreateUser         = errors.New("failed to create user")
 )
 
 // AuthService handles authentication business logic
@@ -111,4 +114,54 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 	}
 
 	return resp, nil
+}
+
+// Add this method to AuthService to expose the registrationRepo
+func (s *AuthService) GetRegistrationRepo() repository.RegistrationRepository {
+	return s.registrationRepo
+}
+
+// CompleteRegistration creates a user from a verified pending registration
+func (s *AuthService) CompleteRegistration(ctx context.Context, pendingID uuid.UUID) (*models.CompleteRegistrationResponse, error) {
+	// Get the pending registration
+	reg, err := s.registrationRepo.GetPendingRegistrationByID(ctx, pendingID)
+	if err != nil {
+		return nil, ErrDatabaseOperation
+	}
+
+	if reg == nil {
+		return nil, errors.New("pending registration not found")
+	}
+
+	// Check if both email and phone are verified
+	if !reg.EmailVerified {
+		return nil, ErrEmailNotVerified
+	}
+
+	if !reg.PhoneVerified {
+		return nil, ErrPhoneNotVerified
+	}
+
+	// Create user in database
+	user := &models.User{
+		UserID:       uuid.New(),
+		Email:        reg.Email,
+		Phone:        reg.Phone,
+		PasswordHash: reg.PasswordHash,
+		CreatedAt:    time.Now().UTC(),
+		UpdatedAt:    time.Now().UTC(),
+	}
+
+	// Save user to database
+	err = s.userRepo.CreateUser(ctx, user)
+	if err != nil {
+		return nil, ErrCreateUser
+	}
+
+	// Return success response
+	return &models.CompleteRegistrationResponse{
+		UserID:    user.UserID,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+	}, nil
 }

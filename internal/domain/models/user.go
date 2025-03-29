@@ -59,3 +59,30 @@ type RegisterResponse struct {
 	Phone     string    `json:"phone,omitempty"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
+
+// VerifyOTPRequest represents the request to verify an OTP
+type VerifyOTPRequest struct {
+	PendingID uuid.UUID `json:"pending_id" binding:"required"`
+	OTPType   string    `json:"otp_type" binding:"required,oneof=email phone"`
+	OTPValue  string    `json:"otp_value" binding:"required,len=6"`
+}
+
+// VerifyOTPResponse represents the response after OTP verification
+type VerifyOTPResponse struct {
+	PendingID uuid.UUID `json:"pending_id"`
+	OTPType   string    `json:"otp_type"`
+	Verified  bool      `json:"verified"`
+	Message   string    `json:"message"`
+}
+
+// CompleteRegistrationRequest represents the request to complete registration
+type CompleteRegistrationRequest struct {
+	PendingID uuid.UUID `json:"pending_id" binding:"required"`
+}
+
+// CompleteRegistrationResponse represents the response after completing registration
+type CompleteRegistrationResponse struct {
+	UserID    uuid.UUID `json:"user_id"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+}

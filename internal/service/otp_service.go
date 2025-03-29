@@ -13,7 +13,10 @@ import (
 )
 
 var (
-	ErrOTPGeneration = errors.New("failed to generate OTP")
+	ErrOTPGeneration  = errors.New("failed to generate OTP")
+	ErrOTPNotFound    = errors.New("OTP not found or expired")
+	ErrOTPMismatch    = errors.New("OTP does not match")
+	ErrOTPMaxAttempts = errors.New("maximum verification attempts exceeded")
 )
 
 // OTPService handles OTP generation and verification
@@ -96,4 +99,57 @@ func (s *OTPService) GenerateAndLogOTPs(ctx context.Context, pendingID uuid.UUID
 		pendingID, emailOTP, phoneOTP)
 
 	return nil
+}
+
+// VerifyOTP verifies an OTP against the stored value
+func (s *OTPService) VerifyOTP(ctx context.Context, pendingID uuid.UUID, otpType, otpValue string) error {
+	// Get the stored OTP
+	otp, err := s.otpRepo.GetOTPByPendingIDAndType(ctx, pendingID, otpType)
+	if err != nil {
+		return err
+	}
+
+	if otp == nil {
+		return ErrOTPNotFound
+	}
+
+	// Check if max attempts exceeded
+	if otp.Attempts >= 3 { // You could make this configurable
+		return ErrOTPMaxAttempts
+	}
+
+	// Increment attempts
+	if err := s.otpRepo.IncrementOTPAttempts(ctx, otp.OTPID); err != nil {
+		return err
+	}
+
+	// Check if OTP matches
+	if otp.OTPValue != otpValue {
+		return ErrOTPMismatch
+	}
+
+	return nil
+}
+
+// MarkVerified marks a verification as complete in the pending registration record
+func (s *OTPService) MarkVerified(ctx context.Context, pendingID uuid.UUID, otpType string, regRepo repository.RegistrationRepository) error {
+	reg, err := regRepo.GetPendingRegistrationByID(ctx, pendingID)
+	if err != nil {
+		return err
+	}
+
+	if reg == nil {
+		return errors.New("pending registration not found")
+	}
+
+	field := ""
+	if otpType == "email" {
+		field = "email_verified"
+	} else if otpType == "phone" {
+		field = "phone_verified"
+	} else {
+		return errors.New("invalid OTP type")
+	}
+
+	return regRepo.UpdateVerificationStatus(ctx, pendingID, field, true)
 }

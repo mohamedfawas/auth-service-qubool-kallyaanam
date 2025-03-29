@@ -71,3 +71,9 @@ func (r *GormUserRepository) GetUserByPhone(ctx context.Context, phone string) (
 
 	return &user, nil
 }
+
+// CreateUser creates a new user
+func (r *GormUserRepository) CreateUser(ctx context.Context, user *models.User) error {
+	result := r.db.WithContext(ctx).Create(user)
+	return result.Error
+}

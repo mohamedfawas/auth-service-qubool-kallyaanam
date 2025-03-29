@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -27,6 +28,18 @@ func NewAuthHandler(db *gorm.DB, authService *service.AuthService, otpService *s
 	}
 }
 
+// Register godoc
+// @Summary Register a new user
+// @Description Start the registration process for a new user
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body models.RegisterRequest true "Registration details"
+// @Success 201 {object} response.Response{data=models.RegisterResponse} "Registration initiated"
+// @Failure 400 {object} response.Response{error=object} "Invalid input"
+// @Failure 409 {object} response.Response{error=string} "Conflict - already exists"
+// @Failure 500 {object} response.Response{error=string} "Server error"
+// @Router /auth/register [post]
 // Register handles the user registration endpoint
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.RegisterRequest
@@ -82,4 +95,103 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	// Return successful response
 	response.Success(c, http.StatusCreated, "Registration initiated successfully. Please verify your email and phone.", resp)
+}
+
+// VerifyOTP handles the OTP verification endpoint
+func (h *AuthHandler) VerifyOTP(c *gin.Context) {
+	var req models.VerifyOTPRequest
+
+	// Bind the request body to the struct
+	if err := c.ShouldBindJSON(&req); err != nil {
+		validationErrors := validator.FormatValidationErrors(err)
+		response.Error(c, http.StatusBadRequest, "Invalid request data", validationErrors)
+		return
+	}
+
+	// Verify the OTP
+	err := h.otpService.VerifyOTP(c.Request.Context(), req.PendingID, req.OTPType, req.OTPValue)
+
+	if err != nil {
+		var statusCode int
+		var errorMessage string
+
+		switch {
+		case errors.Is(err, service.ErrOTPNotFound):
+			statusCode = http.StatusNotFound
+			errorMessage = "OTP not found or expired"
+		case errors.Is(err, service.ErrOTPMismatch):
+			statusCode = http.StatusBadRequest
+			errorMessage = "Invalid OTP"
+		case errors.Is(err, service.ErrOTPMaxAttempts):
+			statusCode = http.StatusTooManyRequests
+			errorMessage = "Maximum verification attempts exceeded"
+		default:
+			statusCode = http.StatusInternalServerError
+			errorMessage = "An error occurred while verifying the OTP"
+			log.Printf("OTP verification error: %v", err)
+		}
+
+		response.Error(c, statusCode, errorMessage, err.Error())
+		return
+	}
+
+	// Mark the verification as complete
+	err = h.otpService.MarkVerified(c.Request.Context(), req.PendingID, req.OTPType, h.authService.GetRegistrationRepo())
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to update verification status", err.Error())
+		return
+	}
+
+	// Return success response
+	resp := models.VerifyOTPResponse{
+		PendingID: req.PendingID,
+		OTPType:   req.OTPType,
+		Verified:  true,
+		Message:   fmt.Sprintf("%s verified successfully", req.OTPType),
+	}
+
+	response.Success(c, http.StatusOK, "OTP verified successfully", resp)
+}
+
+// CompleteRegistration handles the endpoint to complete registration
+func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
+	var req models.CompleteRegistrationRequest
+
+	// Bind the request body to the struct
+	if err := c.ShouldBindJSON(&req); err != nil {
+		validationErrors := validator.FormatValidationErrors(err)
+		response.Error(c, http.StatusBadRequest, "Invalid request data", validationErrors)
+		return
+	}
+
+	// Complete registration
+	resp, err := h.authService.CompleteRegistration(c.Request.Context(), req.PendingID)
+
+	if err != nil {
+		var statusCode int
+		var errorMessage string
+
+		switch {
+		case errors.Is(err, service.ErrEmailNotVerified):
+			statusCode = http.StatusBadRequest
+			errorMessage = "Email not verified"
+		case errors.Is(err, service.ErrPhoneNotVerified):
+			statusCode = http.StatusBadRequest
+			errorMessage = "Phone not verified"
+		case errors.Is(err, service.ErrCreateUser):
+			statusCode = http.StatusInternalServerError
+			errorMessage = "Failed to create user"
+			log.Printf("User creation error: %v", err)
+		default:
+			statusCode = http.StatusInternalServerError
+			errorMessage = "An error occurred while completing registration"
+			log.Printf("Registration completion error: %v", err)
+		}
+
+		response.Error(c, statusCode, errorMessage, err.Error())
+		return
+	}
+
+	// Return successful response
+	response.Success(c, http.StatusCreated, "Registration completed successfully", resp)
 }

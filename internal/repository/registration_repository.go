@@ -101,3 +101,18 @@ func (r *GormRegistrationRepository) GetPendingRegistrationByID(ctx context.Cont
 
 	return &registration, nil
 }
+
+// UpdateVerificationStatus updates the verification status of a pending registration
+func (r *GormRegistrationRepository) UpdateVerificationStatus(ctx context.Context, id uuid.UUID, field string, value bool) error {
+	// Create a map for the update to allow dynamic field name
+	updates := map[string]interface{}{
+		field: value,
+	}
+
+	result := r.db.WithContext(ctx).
+		Model(&models.PendingRegistration{}).
+		Where("pending_id = ?", id).
+		Updates(updates)
+
+	return result.Error
+}

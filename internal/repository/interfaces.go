@@ -18,6 +18,9 @@ type UserRepository interface {
 
 	// GetUserByPhone retrieves a user by their phone number
 	GetUserByPhone(ctx context.Context, phone string) (*models.User, error)
+
+	// CreateUser creates a new user
+	CreateUser(ctx context.Context, user *models.User) error
 }
 
 // RegistrationRepository defines the interface for pending registration operations
@@ -37,6 +40,8 @@ type RegistrationRepository interface {
 
 	// Add this to your RegistrationRepository interface in interfaces.go:
 	CleanExpiredRegistrations(ctx context.Context) (int64, error)
+
+	UpdateVerificationStatus(ctx context.Context, id uuid.UUID, field string, value bool) error
 }
 
 // OTPRepository defines the interface for OTP operations
