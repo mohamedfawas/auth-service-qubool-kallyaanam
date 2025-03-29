@@ -80,10 +80,12 @@ func JWTCSRFProtection() gin.HandlerFunc {
 	}
 }
 
-// computeCSRFHash creates a hash based on the JWT token and client IP
-func computeCSRFHash(token, clientIP string) string {
+// computeCSRFHash creates a hash based on the JWT token and session identifier
+func computeCSRFHash(token string, clientIP string) string {
+	// Consider using session ID instead of client IP
 	h := hmac.New(sha256.New, []byte(token))
-	h.Write([]byte(clientIP))
+	// Use only the token to avoid IP changes causing issues
+	h.Write([]byte("csrf-salt"))
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 

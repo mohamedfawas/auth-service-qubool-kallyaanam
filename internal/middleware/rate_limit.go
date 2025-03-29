@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,7 +12,7 @@ import (
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/response"
 )
 
-// RateLimiter middleware limits requests based on client IP
+// RateLimiter middleware limits requests based on client IP or user ID
 func RateLimiter(rateLimitRepo repository.RateLimitRepository, endpoint string, limit int, window time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip rate limiting if repository is nil (Redis not available)
@@ -19,17 +21,39 @@ func RateLimiter(rateLimitRepo repository.RateLimitRepository, endpoint string, 
 			return
 		}
 
-		// Use client IP as identifier
-		clientIP := c.ClientIP()
-		key := fmt.Sprintf("rate_limit:%s:%s", endpoint, clientIP)
+		// Try to get user ID from context if authenticated
+		var identifier string
+		if userID, exists := c.Get("user_id"); exists {
+			identifier = fmt.Sprintf("user:%s", userID)
+		} else {
+			// Fall back to client IP for unauthenticated users
+			identifier = fmt.Sprintf("ip:%s", c.ClientIP())
+		}
 
-		// Increment counter
+		key := fmt.Sprintf("rate_limit:%s:%s", endpoint, identifier)
+
+		// Use circuit breaker pattern for Redis operations
 		count, err := rateLimitRepo.IncrementCounter(c.Request.Context(), key, window)
 		if err != nil {
-			// Log error but continue (fail open for availability)
+			// Log the error
+			log.Printf("Rate limiting error: %v", err)
+
+			// If too many errors, start failing closed for safety
+			if rateLimitErrors.Increment() > 10 {
+				response.Error(c, http.StatusServiceUnavailable,
+					"Rate limiting service unavailable",
+					"Please try again later")
+				c.Abort()
+				return
+			}
+
+			// Otherwise continue (fail open for lower error rates)
 			c.Next()
 			return
 		}
+
+		// Reset error counter on success
+		rateLimitErrors.Reset()
 
 		// If count exceeds limit, reject the request
 		if count > limit {
@@ -43,3 +67,24 @@ func RateLimiter(rateLimitRepo repository.RateLimitRepository, endpoint string, 
 		c.Next()
 	}
 }
+
+// Simple circuit breaker counter
+type errorCounter struct {
+	count int
+	mu    sync.Mutex
+}
+
+func (c *errorCounter) Increment() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.count++
+	return c.count
+}
+
+func (c *errorCounter) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.count = 0
+}
+
+var rateLimitErrors = &errorCounter{}

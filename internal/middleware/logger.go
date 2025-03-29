@@ -1,31 +1,59 @@
 package middleware
 
 import (
-	"log"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 )
 
-// Logger logs request details
-func Logger() gin.HandlerFunc {
+// StructuredLogger implements structured logging middleware
+func StructuredLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Start timer
-		startTime := time.Now()
+		start := time.Now()
+		path := c.Request.URL.Path
+		raw := c.Request.URL.RawQuery
 
 		// Process request
 		c.Next()
 
 		// Calculate latency
-		latency := time.Since(startTime)
+		latency := time.Since(start)
 
-		// Log request
-		log.Printf("[%s] %s %s %d %s",
-			c.Request.Method,
-			c.Request.URL.Path,
-			c.ClientIP(),
-			c.Writer.Status(),
-			latency,
-		)
+		// Get client IP
+		clientIP := c.ClientIP()
+
+		// Get response status
+		status := c.Writer.Status()
+
+		// Get request method
+		method := c.Request.Method
+
+		// Build query string
+		query := ""
+		if raw != "" {
+			query = "?" + raw
+		}
+
+		// Create structured log entry
+		logger := log.With().
+			Str("method", method).
+			Str("path", path).
+			Str("query", query).
+			Int("status", status).
+			Str("ip", clientIP).
+			Dur("latency", latency).
+			Logger()
+
+		// Log based on status code
+		switch {
+		case status >= 500:
+			logger.Error().Msg("Server error")
+		case status >= 400:
+			logger.Warn().Msg("Client error")
+		default:
+			logger.Info().Msg("Request processed")
+		}
 	}
 }

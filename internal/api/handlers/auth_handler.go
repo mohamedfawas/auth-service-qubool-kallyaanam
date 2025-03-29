@@ -14,28 +14,24 @@ import (
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/response"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/validator"
-	"gorm.io/gorm"
 )
 
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
-	db           *gorm.DB
 	authService  *service.AuthService
 	otpService   *service.OTPService
 	redisClient  *redis.Client
 	tokenService *service.TokenService
 }
 
-// Update constructor to remove sessionRepo parameter
+// Update constructor to remove db parameter
 func NewAuthHandler(
-	db *gorm.DB,
 	authService *service.AuthService,
 	otpService *service.OTPService,
 	redisClient *redis.Client,
 	tokenService *service.TokenService,
 ) *AuthHandler {
 	return &AuthHandler{
-		db:           db,
 		authService:  authService,
 		otpService:   otpService,
 		redisClient:  redisClient,

@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 
@@ -66,6 +68,11 @@ func Load() (*Config, error) {
 	otpExpiryMinutes, _ := strconv.Atoi(getEnv("OTP_EXPIRY_MINUTES", "15"))
 	otpMaxAttempts, _ := strconv.Atoi(getEnv("OTP_MAX_ATTEMPTS", "3"))
 
+	jwtSecret := getEnv("JWT_SECRET_KEY", "")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET_KEY environment variable is required")
+	}
+
 	config := &Config{
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
@@ -93,9 +100,14 @@ func Load() (*Config, error) {
 			PhoneOTPPrefix: "phone_otp:",
 		},
 		JWT: JWTConfig{
-			SecretKey: getEnv("JWT_SECRET_KEY", "your-256-bit-secret"), // In production, use a strong key
+			SecretKey: jwtSecret,
 			Issuer:    getEnv("JWT_ISSUER", "qubool-kallyaanam-auth"),
 		},
+	}
+
+	// Validate the config
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	return config, nil
@@ -129,4 +141,22 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return value
+}
+
+// Validate validates the configuration
+func (c *Config) Validate() error {
+	if c.JWT.SecretKey == "" {
+		return errors.New("JWT secret key is required")
+	}
+
+	if c.Server.Port == "" {
+		return errors.New("server port is required")
+	}
+
+	if c.Database.Host == "" || c.Database.Port == "" ||
+		c.Database.User == "" || c.Database.DBName == "" {
+		return errors.New("database configuration is incomplete")
+	}
+
+	return nil
 }

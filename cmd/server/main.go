@@ -76,37 +76,39 @@ func main() {
 	defer cleanupService.StopCleanupJobs()
 
 	// Create handlers
-	authHandler := handlers.NewAuthHandler(db, authService, otpService, redis, tokenService)
+	authHandler := handlers.NewAuthHandler(authService, otpService, redis, tokenService)
 
 	// Create router with default logger and recovery middleware
 	router := gin.New()
 
 	// Apply global middleware
 	router.Use(gin.Recovery())
-	router.Use(middleware.Logger())
+	router.Use(middleware.StructuredLogger())
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.CORS())
 	router.Use(middleware.JWTCSRFToken())
 
 	// Setup routes
-	auth := router.Group("/auth")
+	v1 := router.Group("/v1")
+	// Set up auth routes with the v1 group
+	authGroup := v1.Group("/auth")
 
 	// Apply rate limiting to auth endpoints - 5 requests per minute
 	if rateLimitRepo != nil {
-		auth.Use(middleware.RateLimiter(rateLimitRepo, "auth", 5, time.Minute))
+		authGroup.Use(middleware.RateLimiter(rateLimitRepo, "auth", 5, time.Minute))
 	}
 
 	// Apply CSRF protection to all non-GET auth endpoints
-	auth.Use(middleware.JWTCSRFProtection())
+	authGroup.Use(middleware.JWTCSRFProtection())
 
 	// Set up routes with the auth group
-	auth.POST("/register", authHandler.Register)
-	auth.POST("/verify-otp", authHandler.VerifyOTP)
-	auth.POST("/complete-registration", authHandler.CompleteRegistration)
-	auth.POST("/refresh-token", authHandler.RefreshToken)
+	authGroup.POST("/register", authHandler.Register)
+	authGroup.POST("/verify-otp", authHandler.VerifyOTP)
+	authGroup.POST("/complete-registration", authHandler.CompleteRegistration)
+	authGroup.POST("/refresh-token", authHandler.RefreshToken)
 
 	healthHandler := handlers.NewHealthHandler(db, redis)
-	router.GET("/health", healthHandler.Health)
+	v1.GET("/health", healthHandler.Health)
 
 	// Setup graceful shutdown
 	quit := make(chan os.Signal, 1)
