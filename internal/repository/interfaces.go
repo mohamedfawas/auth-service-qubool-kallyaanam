@@ -31,10 +31,11 @@ type RegistrationRepository interface {
 	// GetPendingRegistrationByPhone retrieves a pending registration by phone
 	GetPendingRegistrationByPhone(ctx context.Context, phone string) (*models.PendingRegistration, error)
 
+	// GetPendingRegistrationsByEmail retrieves pending registrations by email// Add this method to the RegistrationRepository interface
 	// GetPendingRegistrationByID retrieves a pending registration by ID
 	GetPendingRegistrationByID(ctx context.Context, id uuid.UUID) (*models.PendingRegistration, error)
 
-	// CleanExpiredRegistrations removes expired registrations
+	// Add this to your RegistrationRepository interface in interfaces.go:
 	CleanExpiredRegistrations(ctx context.Context) (int64, error)
 }
 

@@ -5,20 +5,21 @@ import (
 	"log"
 	"time"
 
+	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
 	"github.com/robfig/cron/v3"
 )
 
 // CleanupService handles periodic cleanup of expired data
 type CleanupService struct {
-	otpService *OTPService
-	cron       *cron.Cron
+	regRepo repository.RegistrationRepository
+	cron    *cron.Cron
 }
 
 // NewCleanupService creates a new cleanup service
-func NewCleanupService(otpService *OTPService) *CleanupService {
+func NewCleanupService(regRepo repository.RegistrationRepository) *CleanupService {
 	return &CleanupService{
-		otpService: otpService,
-		cron:       cron.New(),
+		regRepo: regRepo,
+		cron:    cron.New(),
 	}
 }
 
@@ -29,11 +30,12 @@ func (s *CleanupService) StartCleanupJobs() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		err := s.otpService.CleanupExpiredData(ctx)
+		// We'll create a simple method that only cleans up expired registrations
+		err := s.CleanupExpiredRegistrations(ctx)
 		if err != nil {
-			log.Printf("Error cleaning up expired data: %v", err)
+			log.Printf("Error cleaning up expired registrations: %v", err)
 		} else {
-			log.Println("Successfully cleaned up expired data")
+			log.Println("Successfully cleaned up expired registrations")
 		}
 	})
 
@@ -44,6 +46,19 @@ func (s *CleanupService) StartCleanupJobs() {
 
 	s.cron.Start()
 	log.Println("Cleanup jobs started")
+}
+
+// CleanupExpiredRegistrations removes expired registrations
+func (s *CleanupService) CleanupExpiredRegistrations(ctx context.Context) error {
+	// Assuming you have a method to clean up expired registrations in your repository
+	// If you don't have this method yet, you'll need to add it
+	count, err := s.regRepo.CleanExpiredRegistrations(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Cleaned up %d expired registrations", count)
+	return nil
 }
 
 // StopCleanupJobs stops the cleanup cron jobs

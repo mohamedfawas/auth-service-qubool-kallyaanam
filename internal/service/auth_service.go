@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
@@ -31,11 +30,7 @@ type AuthService struct {
 }
 
 // NewAuthService creates a new auth service
-func NewAuthService(
-	userRepo repository.UserRepository,
-	registrationRepo repository.RegistrationRepository,
-	otpService *OTPService,
-) *AuthService {
+func NewAuthService(userRepo repository.UserRepository, registrationRepo repository.RegistrationRepository, otpService *OTPService) *AuthService {
 	return &AuthService{
 		userRepo:         userRepo,
 		registrationRepo: registrationRepo,
@@ -100,22 +95,12 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 		ExpiresAt:     expiresAt,
 	}
 
-	// Create the registration
 	if err := s.registrationRepo.CreatePendingRegistration(ctx, pendingReg); err != nil {
 		return nil, ErrDatabaseOperation
 	}
 
-	// Generate OTPs
-	emailOTP, phoneOTP, err := s.otpService.GenerateOTPsForRegistration(ctx, pendingID)
-	if err != nil {
-		return nil, err
-	}
-
-	// In development mode, log the OTPs instead of sending them
-	log.Printf("OTPs for %s: Email OTP: %s, Phone OTP: %s",
-		req.Email, emailOTP, phoneOTP)
-	// In production, you would send these via email and SMS
-	// This will be handled by the handler
+	// OTPs will be generated in the handler using otpService.GenerateAndLogOTPs
+	// No need to generate them here
 
 	// Return response
 	resp := &models.RegisterResponse{

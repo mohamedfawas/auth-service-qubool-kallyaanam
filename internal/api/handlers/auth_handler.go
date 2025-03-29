@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
-	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/response"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/validator"
@@ -17,19 +16,14 @@ import (
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
 	authService *service.AuthService
+	otpService  *service.OTPService
 }
 
 // NewAuthHandler creates a new auth handler
-func NewAuthHandler(db *gorm.DB) *AuthHandler {
-	// Initialize repositories
-	userRepo := repository.NewUserRepository(db)
-	regRepo := repository.NewRegistrationRepository(db)
-
-	// Initialize service
-	authService := service.NewAuthService(userRepo, regRepo)
-
+func NewAuthHandler(db *gorm.DB, authService *service.AuthService, otpService *service.OTPService) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
+		otpService:  otpService,
 	}
 }
 
@@ -76,6 +70,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 		response.Error(c, statusCode, errorMessage, err.Error())
 		return
+	}
+
+	// Generate and log OTPs for the pending registration
+	err = h.otpService.GenerateAndLogOTPs(c.Request.Context(), resp.PendingID)
+	if err != nil {
+		log.Printf("Failed to generate OTPs: %v", err)
+		// Continue with the registration even if OTP generation fails
+		// In a production environment, you might want to handle this differently
 	}
 
 	// Return successful response

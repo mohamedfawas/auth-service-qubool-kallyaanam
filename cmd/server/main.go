@@ -12,7 +12,6 @@ import (
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/api/routes"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/config"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
-	redisRepo "github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository/redis"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/postgres"
 	redisClient "github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/redis"
@@ -39,11 +38,10 @@ func main() {
 	}
 
 	// Connect to Redis
-	redis, err := redisClient.Connect(&cfg.Redis)
+	_, err = redisClient.Connect(&cfg.Redis)
 	if err != nil {
 		log.Printf("Warning: Failed to connect to Redis: %v", err)
 		log.Println("Continuing without Redis - rate limiting will be disabled")
-		redis = nil
 	}
 
 	// Create repositories
@@ -51,25 +49,20 @@ func main() {
 	regRepo := repository.NewRegistrationRepository(db)
 	otpRepo := repository.NewOTPRepository(db)
 
-	var rateLimitRepo repository.RateLimitRepository
-	if redis != nil {
-		rateLimitRepo = redisRepo.NewRateLimitRepository(redis)
-	}
-
 	// Create services
-	otpService := service.NewOTPService(otpRepo, regRepo, rateLimitRepo, &cfg.OTP)
+	otpService := service.NewOTPService(otpRepo)
 	authService := service.NewAuthService(userRepo, regRepo, otpService)
-	cleanupService := service.NewCleanupService(otpService)
+	cleanupService := service.NewCleanupService(regRepo)
 
 	// Start cleanup jobs
 	cleanupService.StartCleanupJobs()
 	defer cleanupService.StopCleanupJobs()
 
-	// Create router
-	router := gin.Default()
-
 	// Create handlers
 	authHandler := handlers.NewAuthHandler(db, authService, otpService)
+
+	// Create router
+	router := gin.Default()
 
 	// Setup routes
 	routes.Setup(router, authHandler)

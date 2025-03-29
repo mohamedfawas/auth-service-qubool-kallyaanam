@@ -48,11 +48,6 @@ services:
       - DB_SSLMODE=disable
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=
-      - REDIS_DB=0
-      - OTP_LENGTH=6
-      - OTP_EXPIRY_MINUTES=15
-      - OTP_MAX_ATTEMPTS=3
     ports:
       - "8080:8080"
     restart: unless-stopped

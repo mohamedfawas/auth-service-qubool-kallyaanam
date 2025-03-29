@@ -73,6 +73,16 @@ func (r *GormRegistrationRepository) GetPendingRegistrationByPhone(ctx context.C
 	return &registration, nil
 }
 
+// And add this implementation to your GormRegistrationRepository:
+func (r *GormRegistrationRepository) CleanExpiredRegistrations(ctx context.Context) (int64, error) {
+	result := r.db.WithContext(ctx).
+		Where("expires_at < ?", time.Now().UTC()).
+		Delete(&models.PendingRegistration{})
+
+	return result.RowsAffected, result.Error
+}
+
+// Add this method to the GormRegistrationRepository
 // GetPendingRegistrationByID retrieves a pending registration by ID
 func (r *GormRegistrationRepository) GetPendingRegistrationByID(ctx context.Context, id uuid.UUID) (*models.PendingRegistration, error) {
 	var registration models.PendingRegistration
@@ -90,13 +100,4 @@ func (r *GormRegistrationRepository) GetPendingRegistrationByID(ctx context.Cont
 	}
 
 	return &registration, nil
-}
-
-// CleanExpiredRegistrations removes expired registrations
-func (r *GormRegistrationRepository) CleanExpiredRegistrations(ctx context.Context) (int64, error) {
-	result := r.db.WithContext(ctx).
-		Where("expires_at < ?", time.Now().UTC()).
-		Delete(&models.PendingRegistration{})
-
-	return result.RowsAffected, result.Error
 }
