@@ -135,7 +135,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// JWT-based approach (new method)
 	if h.tokenService != nil {
 		// Generate JWT token
-		token, err := h.tokenService.GenerateToken(resp.PendingID, resp.ExpiresAt)
+		token, err := h.tokenService.GenerateToken(resp.PendingID, time.Now().Add(15*time.Minute))
 		if err != nil {
 			log.Printf("Failed to generate JWT token: %v", err)
 		} else {
@@ -143,12 +143,28 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			c.SetCookie(
 				h.tokenService.GetCookieName(),
 				token,
-				int(time.Until(resp.ExpiresAt).Seconds()),
+				int((15 * time.Minute).Seconds()),
 				"/",
 				"",
 				c.Request.TLS != nil,
 				true,
 			)
+
+			// Generate and set refresh token
+			refreshToken, err := h.tokenService.GenerateRefreshToken(resp.PendingID)
+			if err != nil {
+				log.Printf("Failed to generate refresh token: %v", err)
+			} else {
+				c.SetCookie(
+					"refresh_token",
+					refreshToken,
+					int((24 * time.Hour * 7).Seconds()), // 7 days
+					"/",
+					"",
+					c.Request.TLS != nil,
+					true,
+				)
+			}
 		}
 	}
 
@@ -353,11 +369,79 @@ func (h *AuthHandler) CompleteRegistration(c *gin.Context) {
 		}
 	}
 
-	// Clear JWT token cookie
+	// Clear JWT token cookies
 	if h.tokenService != nil {
+		// Get the token before clearing it
+		token, err := c.Cookie(h.tokenService.GetCookieName())
+		if err == nil && token != "" {
+			// Add to invalidation list (blacklist)
+			h.tokenService.InvalidateToken(token)
+		}
+
+		// Clear access and refresh token cookies
 		c.SetCookie(h.tokenService.GetCookieName(), "", -1, "/", "", c.Request.TLS != nil, true)
+		c.SetCookie("refresh_token", "", -1, "/", "", c.Request.TLS != nil, true)
+		c.SetCookie("csrf_token", "", -1, "/", "", c.Request.TLS != nil, true)
 	}
 
 	// Return successful response
 	response.Success(c, http.StatusCreated, "Registration completed successfully", resp)
+}
+
+// RefreshToken handles the token refresh endpoint
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+
+	// Bind the request body to the struct
+	if err := c.ShouldBindJSON(&req); err != nil {
+		validationErrors := validator.FormatValidationErrors(err)
+		response.Error(c, http.StatusBadRequest, "Invalid request data", validationErrors)
+		return
+	}
+
+	// If no refresh token in body, try to get it from cookie
+	if req.RefreshToken == "" {
+		refreshToken, err := c.Cookie("refresh_token")
+		if err != nil || refreshToken == "" {
+			response.Error(c, http.StatusBadRequest, "Refresh token required", "Missing refresh token")
+			return
+		}
+		req.RefreshToken = refreshToken
+	}
+
+	// Refresh the token
+	newAccessToken, newRefreshToken, err := h.tokenService.RefreshToken(req.RefreshToken)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "Invalid refresh token", err.Error())
+		return
+	}
+
+	// Set cookies for both tokens
+	c.SetCookie(
+		h.tokenService.GetCookieName(),
+		newAccessToken,
+		int((15 * time.Minute).Seconds()),
+		"/",
+		"",
+		c.Request.TLS != nil,
+		true,
+	)
+
+	c.SetCookie(
+		"refresh_token",
+		newRefreshToken,
+		int((24 * time.Hour * 7).Seconds()), // Refresh token valid for a week
+		"/",
+		"",
+		c.Request.TLS != nil,
+		true,
+	)
+
+	// Also return tokens in response for clients that don't use cookies
+	response.Success(c, http.StatusOK, "Token refreshed successfully", gin.H{
+		"access_token": newAccessToken,
+		"expires_in":   int((15 * time.Minute).Seconds()),
+	})
 }

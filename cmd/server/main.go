@@ -87,6 +87,7 @@ func main() {
 	router.Use(middleware.Logger())
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.CORS())
+	router.Use(middleware.CSRFToken())
 
 	// Setup routes
 	auth := router.Group("/auth")
@@ -96,10 +97,14 @@ func main() {
 		auth.Use(middleware.RateLimiter(rateLimitRepo, "auth", 5, time.Minute))
 	}
 
+	// Apply CSRF protection to all non-GET auth endpoints
+	auth.Use(middleware.CSRFProtection())
+
 	// Set up routes with the auth group
 	auth.POST("/register", authHandler.Register)
 	auth.POST("/verify-otp", authHandler.VerifyOTP)
 	auth.POST("/complete-registration", authHandler.CompleteRegistration)
+	auth.POST("/refresh-token", authHandler.RefreshToken)
 
 	healthHandler := handlers.NewHealthHandler(db, redis)
 	router.GET("/health", healthHandler.Health)
