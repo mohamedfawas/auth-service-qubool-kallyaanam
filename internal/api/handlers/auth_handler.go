@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
+	appErrors "github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/errors"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/response"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/validator"
 )
@@ -93,7 +94,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			log.Printf("Registration error: %v", err)
 		}
 
-		response.Error(c, statusCode, errorMessage, err.Error())
+		// Use appErrors.SanitizeError to ensure no sensitive details are leaked
+		response.Error(c, statusCode, errorMessage, appErrors.SanitizeError(err).Error())
 		return
 	}
 

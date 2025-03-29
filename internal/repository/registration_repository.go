@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
+	appErrors "github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/errors"
 )
 
 // GormRegistrationRepository implements the RegistrationRepository interface using GORM
@@ -96,7 +98,8 @@ func (r *GormRegistrationRepository) GetPendingRegistrationByID(ctx context.Cont
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, result.Error
+		return nil, appErrors.WrapWithType(result.Error, appErrors.ErrDatabase,
+			fmt.Sprintf("failed to retrieve pending registration with ID %s", id))
 	}
 
 	return &registration, nil

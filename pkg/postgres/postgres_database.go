@@ -6,6 +6,7 @@ import (
 
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/config"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/domain/models"
+	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository/migrations"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -35,6 +36,12 @@ func Connect(cfg *config.Config) (*gorm.DB, error) {
 	if err != nil {
 		log.Printf("Failed to migrate database: %v", err)
 		return nil, err
+	}
+
+	// Run custom migrations
+	if err := migrations.AddIndexes(db); err != nil {
+		log.Printf("Warning: Failed to apply custom migrations: %v", err)
+		// Continue anyway as the indexes are also defined in the model
 	}
 
 	return db, nil
