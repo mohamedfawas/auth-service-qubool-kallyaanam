@@ -54,3 +54,22 @@ func (r *GormOTPRepository) GetOTPByPendingIDAndType(ctx context.Context, pendin
 
 	return &otp, nil
 }
+
+// IncrementOTPAttempts increments the attempt counter for an OTP
+func (r *GormOTPRepository) IncrementOTPAttempts(ctx context.Context, otpID uuid.UUID) error {
+	result := r.db.WithContext(ctx).
+		Model(&models.VerificationOTP{}).
+		Where("otp_id = ?", otpID).
+		UpdateColumn("attempts", gorm.Expr("attempts + 1"))
+
+	return result.Error
+}
+
+// CleanExpiredOTPs removes expired OTPs
+func (r *GormOTPRepository) CleanExpiredOTPs(ctx context.Context) (int64, error) {
+	result := r.db.WithContext(ctx).
+		Where("expires_at < ?", time.Now().UTC()).
+		Delete(&models.VerificationOTP{})
+
+	return result.RowsAffected, result.Error
+}

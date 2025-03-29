@@ -45,11 +45,11 @@ type User struct {
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// RegisterRequest represents the data sent by the client to register
+// Update the RegisterRequest struct with the new password validation
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email,max=255"`
 	Phone    string `json:"phone" binding:"required,max=15"`
-	Password string `json:"password" binding:"required,min=8"`
+	Password string `json:"password" binding:"required,min=8,strongpassword"`
 }
 
 // RegisterResponse represents the response sent back to the client

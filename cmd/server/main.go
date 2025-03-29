@@ -6,12 +6,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/api/handlers"
-	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/api/routes"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/config"
+	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/middleware"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository"
+	redisRepo "github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/repository/redis"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/postgres"
 	redisClient "github.com/mohamedfawas/auth-service-qubool-kallyaanam/pkg/redis"
@@ -38,10 +41,15 @@ func main() {
 	}
 
 	// Connect to Redis
-	_, err = redisClient.Connect(&cfg.Redis)
+	var redis *redis.Client
+	var rateLimitRepo repository.RateLimitRepository
+
+	redis, err = redisClient.Connect(&cfg.Redis)
 	if err != nil {
 		log.Printf("Warning: Failed to connect to Redis: %v", err)
 		log.Println("Continuing without Redis - rate limiting will be disabled")
+	} else {
+		rateLimitRepo = redisRepo.NewRateLimitRepository(redis)
 	}
 
 	// Create repositories
@@ -61,11 +69,32 @@ func main() {
 	// Create handlers
 	authHandler := handlers.NewAuthHandler(db, authService, otpService)
 
-	// Create router
-	router := gin.Default()
+	// Create router with default logger and recovery middleware
+	router := gin.New()
+
+	// Apply global middleware
+	router.Use(gin.Recovery())
+	router.Use(middleware.Logger())
+	router.Use(middleware.SecurityHeaders())
+	router.Use(middleware.CORS())
 
 	// Setup routes
-	routes.Setup(router, authHandler)
+	auth := router.Group("/auth")
+
+	// Apply rate limiting to auth endpoints - 5 requests per minute
+	if rateLimitRepo != nil {
+		auth.Use(middleware.RateLimiter(rateLimitRepo, "auth", 5, time.Minute))
+	}
+
+	// Set up routes with the auth group
+	auth.POST("/register", authHandler.Register)
+
+	// Health check route (outside auth group to avoid rate limiting)
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "ok",
+		})
+	})
 
 	// Setup graceful shutdown
 	quit := make(chan os.Signal, 1)

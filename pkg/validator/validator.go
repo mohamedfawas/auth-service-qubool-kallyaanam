@@ -9,11 +9,14 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// Setup initializes custom validators
+// Update the Setup function to register the new validator
 func Setup() {
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
 		// Register custom validation for phone number in E.164 format
 		v.RegisterValidation("e164", validateE164)
+
+		// Register custom validation for password strength
+		v.RegisterValidation("strongpassword", validatePasswordStrength)
 	}
 }
 
@@ -58,4 +61,43 @@ func FormatValidationErrors(err error) map[string]string {
 	}
 
 	return errors
+}
+
+// validatePasswordStrength validates password strength
+func validatePasswordStrength(fl validator.FieldLevel) bool {
+	password := fl.Field().String()
+
+	// Check length (already handled by min=8 in the binding tag)
+	if len(password) < 8 {
+		return false
+	}
+
+	// Check for uppercase letter
+	hasUpper := regexp.MustCompile(`[A-Z]`).MatchString(password)
+
+	// Check for lowercase letter
+	hasLower := regexp.MustCompile(`[a-z]`).MatchString(password)
+
+	// Check for number
+	hasNumber := regexp.MustCompile(`[0-9]`).MatchString(password)
+
+	// Check for special character
+	hasSpecial := regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]`).MatchString(password)
+
+	// Require at least 3 of the 4 character types
+	typeCount := 0
+	if hasUpper {
+		typeCount++
+	}
+	if hasLower {
+		typeCount++
+	}
+	if hasNumber {
+		typeCount++
+	}
+	if hasSpecial {
+		typeCount++
+	}
+
+	return typeCount >= 3
 }
