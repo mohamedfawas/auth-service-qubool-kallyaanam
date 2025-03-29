@@ -70,13 +70,14 @@ func main() {
 	otpService := service.NewOTPService(otpRepo)
 	authService := service.NewAuthService(userRepo, regRepo, otpService)
 	cleanupService := service.NewCleanupService(regRepo)
+	tokenService := service.NewTokenService(cfg.JWT.SecretKey, cfg.JWT.Issuer)
 
 	// Start cleanup jobs
 	cleanupService.StartCleanupJobs()
 	defer cleanupService.StopCleanupJobs()
 
 	// Create handlers
-	authHandler := handlers.NewAuthHandler(db, authService, otpService, redis, sessionRepo)
+	authHandler := handlers.NewAuthHandler(db, authService, otpService, redis, sessionRepo, tokenService)
 
 	// Create router with default logger and recovery middleware
 	router := gin.New()

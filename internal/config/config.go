@@ -14,6 +14,7 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	OTP      OTPConfig
+	JWT      JWTConfig // Add this field
 }
 
 // ServerConfig holds server-specific configuration
@@ -47,6 +48,12 @@ type OTPConfig struct {
 	MaxAttempts    int
 	EmailOTPPrefix string
 	PhoneOTPPrefix string
+}
+
+// JWTConfig holds JWT configuration
+type JWTConfig struct {
+	SecretKey string
+	Issuer    string
 }
 
 // Load loads the configuration from environment variables
@@ -84,6 +91,10 @@ func Load() (*Config, error) {
 			MaxAttempts:    otpMaxAttempts,
 			EmailOTPPrefix: "email_otp:",
 			PhoneOTPPrefix: "phone_otp:",
+		},
+		JWT: JWTConfig{
+			SecretKey: getEnv("JWT_SECRET_KEY", "your-256-bit-secret"), // In production, use a strong key
+			Issuer:    getEnv("JWT_ISSUER", "qubool-kallyaanam-auth"),
 		},
 	}
 

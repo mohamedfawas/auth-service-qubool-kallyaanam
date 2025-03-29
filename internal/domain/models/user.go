@@ -54,6 +54,7 @@ type RegisterRequest struct {
 
 // RegisterResponse represents the response sent back to the client
 type RegisterResponse struct {
+	PendingID uuid.UUID `json:"-"`
 	Email     string    `json:"email,omitempty"`
 	Phone     string    `json:"phone,omitempty"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
