@@ -25,6 +25,7 @@ type ServerConfig struct {
 	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
+	Env          string        `mapstructure:"env"`
 }
 
 // DatabaseConfig contains database connection configuration.
