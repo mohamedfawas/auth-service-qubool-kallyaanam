@@ -1,0 +1,53 @@
+server:
+  port: "8080"
+  read_timeout: 10s
+  write_timeout: 10s
+  idle_timeout: 120s
+  env: "development"
+
+database:
+  host: "postgres"
+  port: "5432"
+  user: "postgres"
+  password: "postgres"
+  dbname: "auth_service"
+  sslmode: "disable"
+  max_idle_connections: 10
+  max_open_connections: 100
+
+redis:
+  host: "redis"
+  port: "6379"
+  password: ""
+  db: 0
+
+auth:
+  jwt_secret: "your-jwt-secret-key-change-me-in-production"
+  access_token_expiry: 1h
+  refresh_token_expiry: 168h
+  registration_expiry: 24h
+  verification_expiry: 15m
+  bcrypt_cost: 12
+  cookie_secure: false
+  cookie_domain: "localhost"
+  enable_rate_limiting: true
+  rate_limit_per_minute: 10
+
+validation:
+  password_min_length: 8
+  email_code_length: 6
+  phone_code_length: 6
+
+email:
+  smtp_host: ""
+  smtp_port: 587
+  smtp_user: ""
+  smtp_password: ""
+  from_email: "no-reply@quboolkallyanam.com"
+  from_name: "Qubool Kallyanam"
+
+sms:
+  provider: ""
+  api_key: ""
+  api_secret: ""
+  from_phone: ""
