@@ -49,6 +49,23 @@ func LoadConfig() (*Config, error) {
 	viper.SetConfigFile(".env")
 	viper.AutomaticEnv()
 
+	// Set default values
+	viper.SetDefault("SERVER_HOST", "0.0.0.0")
+	viper.SetDefault("SERVER_PORT", "8080")
+	viper.SetDefault("POSTGRES_HOST", "postgres")
+	viper.SetDefault("POSTGRES_PORT", "5432")
+	viper.SetDefault("POSTGRES_USER", "postgres")
+	viper.SetDefault("POSTGRES_PASSWORD", "postgres")
+	viper.SetDefault("POSTGRES_DB", "auth_db")
+	viper.SetDefault("POSTGRES_SSL_MODE", "disable")
+	viper.SetDefault("REDIS_HOST", "redis")
+	viper.SetDefault("REDIS_PORT", "6379")
+	viper.SetDefault("REDIS_PASSWORD", "")
+	viper.SetDefault("REDIS_DB", 0)
+	viper.SetDefault("JWT_SECRET", "default_secret")
+	viper.SetDefault("JWT_EXPIRY", "24h")
+	viper.SetDefault("ENV", "development")
+
 	/*
 		This function attempts to read the configuration file that was previously set using viper.SetConfigFile(".env")
 	*/

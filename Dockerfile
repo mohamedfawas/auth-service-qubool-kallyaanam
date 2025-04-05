@@ -18,6 +18,7 @@ WORKDIR /root/
 COPY --from=builder /app/auth-service .
 COPY --from=builder /app/configs ./configs
 COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/.env ./.env
 
 EXPOSE 8080
 
