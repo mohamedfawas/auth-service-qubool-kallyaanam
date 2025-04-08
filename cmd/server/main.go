@@ -1,114 +1,58 @@
-// auth-service-qubool-kallyaanam/cmd/main.go
 package main
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/lib/pq"
+	"github.com/joho/godotenv"
+
+	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/application/usecase"
+	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/infrastructure/database"
+	gormRepo "github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/infrastructure/repository/gorm"
+	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/interfaces/http/routes"
 )
 
 func main() {
-	// Database connection
-	dbHost := os.Getenv("DB_HOST")
-	if dbHost == "" {
-		dbHost = "postgres" // Default in Docker
+	// Load environment variables
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables")
 	}
 
-	dbPort := os.Getenv("DB_PORT")
-	if dbPort == "" {
-		dbPort = "5432" // Default PostgreSQL port
+	// Get database connection string from environment
+	dbDSN := os.Getenv("DATABASE_URL")
+	if dbDSN == "" {
+		dbDSN = "host=localhost user=postgres password=postgres dbname=auth_service port=5432 sslmode=disable TimeZone=UTC"
 	}
 
-	dbUser := os.Getenv("DB_USER")
-	if dbUser == "" {
-		dbUser = "postgres" // Default user
-	}
-
-	dbPassword := os.Getenv("DB_PASSWORD")
-	if dbPassword == "" {
-		dbPassword = "postgres" // Default password
-	}
-
-	dbName := os.Getenv("DB_NAME")
-	if dbName == "" {
-		dbName = "auth_db" // Default database name
-	}
-
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	// Try to connect to database
-	db, err := sql.Open("postgres", connStr)
+	// Initialize database connection
+	db, err := database.NewDatabase(dbDSN)
 	if err != nil {
-		log.Printf("Error opening database connection: %v", err)
-	} else {
-		// Test connection
-		err = db.Ping()
-		if err != nil {
-			log.Printf("Error connecting to database: %v", err)
-		} else {
-			log.Println("Successfully connected to database")
-		}
-		defer db.Close()
+		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
+	// Initialize repositories
+	userRepo := gormRepo.NewUserRepository(db)
+
+	// Initialize use cases
+	registrationUseCase := usecase.NewRegistrationUseCase(userRepo)
+
+	// Initialize Gin router
 	router := gin.Default()
 
-	// Health Check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		// Check database health
-		dbStatus := "UP"
-		if db != nil {
-			err := db.Ping()
-			if err != nil {
-				dbStatus = "DOWN"
-			}
-		} else {
-			dbStatus = "DOWN"
-		}
+	// Setup routes
+	routes.SetupRoutes(router, registrationUseCase)
 
-		c.JSON(http.StatusOK, gin.H{
-			"status":   "UP",
-			"service":  "auth-service",
-			"version":  "0.1.0",
-			"database": dbStatus,
-		})
-	})
-
-	// Start server
-	srv := &http.Server{
-		Addr:    ":8081",
-		Handler: router,
+	// Get port from environment
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8081"
 	}
 
-	// Graceful shutdown
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
-		}
-	}()
-
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server...")
-
-	// Give outstanding requests a timeout of 5 seconds to complete
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("Server forced to shutdown:", err)
+	// Start the server
+	log.Printf("Starting auth service on port %s", port)
+	if err := router.Run(fmt.Sprintf(":%s", port)); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
-
-	log.Println("Server exiting")
 }
