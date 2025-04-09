@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/application/dto"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/application/interfaces"
@@ -15,20 +14,23 @@ import (
 )
 
 type RegistrationUseCase struct {
-	userRepo     interfaces.UserRepository
-	otpService   interfaces.OTPService
-	emailService interfaces.EmailService
+	userRepo        interfaces.UserRepository
+	otpService      interfaces.OTPService
+	emailService    interfaces.EmailService
+	securityService interfaces.SecurityService
 }
 
 func NewRegistrationUseCase(
 	userRepo interfaces.UserRepository,
 	otpService interfaces.OTPService,
 	emailService interfaces.EmailService,
+	securityService interfaces.SecurityService,
 ) *RegistrationUseCase {
 	return &RegistrationUseCase{
-		userRepo:     userRepo,
-		otpService:   otpService,
-		emailService: emailService,
+		userRepo:        userRepo,
+		otpService:      otpService,
+		emailService:    emailService,
+		securityService: securityService,
 	}
 }
 
@@ -71,8 +73,8 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, req *dto.Registrati
 	var registrationID uuid.UUID
 
 	err = uc.userRepo.WithTransaction(ctx, func(txCtx context.Context) error {
-		// Hash the password
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		// Hash the password using the security service
+		hashedPassword, err := uc.securityService.HashPassword(txCtx, req.Password)
 		if err != nil {
 			return fmt.Errorf("failed to hash password: %w", err)
 		}
@@ -84,7 +86,7 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, req *dto.Registrati
 		}
 
 		// Get current time and calculate expiry times
-		now := time.Now().UTC()
+		now := time.Now()
 		otpExpiry := uc.otpService.GetOTPExpiryTime(txCtx)
 		registrationExpiry := now.Add(24 * time.Hour)
 
@@ -94,7 +96,7 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, req *dto.Registrati
 			ID:        registrationID,
 			Email:     req.Email,
 			Phone:     req.Phone,
-			Password:  string(hashedPassword),
+			Password:  hashedPassword,
 			CreatedAt: now,
 			UpdatedAt: now,
 			ExpiresAt: registrationExpiry,
