@@ -12,4 +12,6 @@ type UserRepository interface {
 	FindUserByPhone(ctx context.Context, phone string) (bool, error)
 	FindPendingRegistrationByEmail(ctx context.Context, email string) (bool, error)
 	FindPendingRegistrationByPhone(ctx context.Context, phone string) (bool, error)
+	// WithTransaction executes operations within a transaction
+	WithTransaction(ctx context.Context, fn func(txCtx context.Context) error) error
 }
