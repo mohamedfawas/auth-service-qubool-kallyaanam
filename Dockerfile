@@ -7,7 +7,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o auth-service ./cmd/server/main.go
+RUN go build -o auth-service ./cmd/api/main.go
 
 FROM alpine:latest
 
