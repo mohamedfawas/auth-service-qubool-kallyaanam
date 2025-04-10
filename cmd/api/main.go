@@ -14,13 +14,13 @@ import (
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/config"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/handler"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/middleware"
+	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository"
 	postgreRepo "github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository/postgres"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/util/logger"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/pkg/database"
 )
 
-// Add this function
 func createDBIfNotExists() error {
 	// Connect to default postgres database first
 	dbHost := os.Getenv("DB_HOST")
@@ -70,10 +70,11 @@ func createDBIfNotExists() error {
 }
 
 func main() {
-	// Add this line at the beginning of main()
+	// Create database if it doesn't exist
 	if err := createDBIfNotExists(); err != nil {
 		log.Printf("Error creating database: %v", err)
 	}
+
 	// Load configuration
 	cfg := config.NewConfig()
 
@@ -90,15 +91,18 @@ func main() {
 	}
 
 	// Initialize repositories
-	userRepo := postgreRepo.NewUserRepository(db)
+	var userRepo repository.UserRepository
+	userRepo = postgreRepo.NewUserRepository(db)
 
 	// Initialize services
-	otpService := service.NewOTPService(service.OTPConfig{
+	var otpService service.OTPService
+	otpService = service.NewOTPService(service.OTPConfig{
 		Length:     cfg.OTP.Length,
 		ExpiryMins: cfg.OTP.ExpiryMins,
 	})
 
-	emailService, err := service.NewEmailService(service.EmailConfig{
+	var emailService service.EmailService
+	emailService, err = service.NewEmailService(service.EmailConfig{
 		FromEmail:     cfg.Email.FromEmail,
 		FromName:      cfg.Email.FromName,
 		OTPExpiryMins: cfg.Email.OTPExpiryMins,
@@ -108,16 +112,19 @@ func main() {
 		appLogger.Fatal("Failed to initialize email service", appLogger.Field("error", err.Error()))
 	}
 
-	securityService := service.NewSecurityService(service.SecurityConfig{
+	var securityService service.SecurityService
+	securityService = service.NewSecurityService(service.SecurityConfig{
 		BcryptCost:       cfg.Security.BcryptCost,
 		MinPasswordChars: cfg.Security.MinPasswordChars,
 	})
 
-	// Use no-op metrics service instead of Prometheus
-	metricsService := service.NewNoOpMetricsService()
+	// Use no-op metrics service
+	var metricsService service.MetricsService
+	metricsService = service.NewNoOpMetricsService()
 
 	// Initialize auth service
-	authService := service.NewAuthService(
+	var authService service.AuthService
+	authService = service.NewAuthService(
 		userRepo,
 		otpService,
 		emailService,

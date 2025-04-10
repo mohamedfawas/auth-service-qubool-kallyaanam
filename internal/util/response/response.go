@@ -9,7 +9,7 @@ import (
 
 // StandardResponse represents the standard API response format
 type StandardResponse struct {
-	Status  bool        `json:"status"`
+	Status  int         `json:"status"` // HTTP status code
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
@@ -17,8 +17,9 @@ type StandardResponse struct {
 
 // Success returns a successful response with standard format
 func Success(c *gin.Context, message string, data interface{}) {
-	c.JSON(http.StatusOK, StandardResponse{
-		Status:  true,
+	statusCode := http.StatusOK
+	c.JSON(statusCode, StandardResponse{
+		Status:  statusCode,
 		Message: message,
 		Data:    data,
 	})
@@ -26,8 +27,9 @@ func Success(c *gin.Context, message string, data interface{}) {
 
 // Created returns a successful creation response with standard format
 func Created(c *gin.Context, message string, data interface{}) {
-	c.JSON(http.StatusCreated, StandardResponse{
-		Status:  true,
+	statusCode := http.StatusCreated
+	c.JSON(statusCode, StandardResponse{
+		Status:  statusCode,
 		Message: message,
 		Data:    data,
 	})
@@ -41,7 +43,7 @@ func Error(c *gin.Context, statusCode int, message string, err error) {
 	}
 
 	c.JSON(statusCode, StandardResponse{
-		Status:  false,
+		Status:  statusCode,
 		Message: message,
 		Error:   errorMessage,
 	})
@@ -52,22 +54,17 @@ func BadRequest(c *gin.Context, message string, err error) {
 	Error(c, http.StatusBadRequest, message, err)
 }
 
-// Unauthorized returns a 401 unauthorized error with standard format
-func Unauthorized(c *gin.Context, message string, err error) {
-	Error(c, http.StatusUnauthorized, message, err)
-}
-
-// Forbidden returns a 403 forbidden error with standard format
-func Forbidden(c *gin.Context, message string, err error) {
-	Error(c, http.StatusForbidden, message, err)
-}
-
 // NotFound returns a 404 not found error with standard format
 func NotFound(c *gin.Context, message string, err error) {
 	Error(c, http.StatusNotFound, message, err)
 }
 
 // InternalServerError returns a 500 internal server error with standard format
-func InternalServerError(c *gin.Context, err error) {
-	Error(c, http.StatusInternalServerError, "Internal server error", err)
+func InternalServerError(c *gin.Context, message string, err error) {
+	Error(c, http.StatusInternalServerError, message, err)
+}
+
+// Conflict returns a 409 conflict error with standard format
+func Conflict(c *gin.Context, message string, err error) {
+	Error(c, http.StatusConflict, message, err)
 }

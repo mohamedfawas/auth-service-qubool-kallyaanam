@@ -12,20 +12,29 @@ import (
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository"
 )
 
-type AuthService struct {
+// AuthService defines the interface for authentication operations
+type AuthService interface {
+	// Register registers a new user and sends verification OTP
+	Register(ctx context.Context, req *model.RegistrationRequest) (*model.RegistrationResponse, error)
+	// Add other methods as needed (login, verify, etc.)
+}
+
+// Implementation of the AuthService interface
+type authService struct {
 	userRepo        repository.UserRepository
 	otpService      OTPService
 	emailService    EmailService
 	securityService SecurityService
 }
 
+// NewAuthService creates a new auth service instance
 func NewAuthService(
 	userRepo repository.UserRepository,
 	otpService OTPService,
 	emailService EmailService,
 	securityService SecurityService,
-) *AuthService {
-	return &AuthService{
+) AuthService {
+	return &authService{
 		userRepo:        userRepo,
 		otpService:      otpService,
 		emailService:    emailService,
@@ -33,7 +42,8 @@ func NewAuthService(
 	}
 }
 
-func (s *AuthService) Register(ctx context.Context, req *model.RegistrationRequest) (*model.RegistrationResponse, error) {
+// Register handles user registration including email verification
+func (s *authService) Register(ctx context.Context, req *model.RegistrationRequest) (*model.RegistrationResponse, error) {
 	// Check if user already exists with the same email
 	exists, err := s.userRepo.FindUserByEmail(ctx, req.Email)
 	if err != nil {
