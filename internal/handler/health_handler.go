@@ -18,7 +18,9 @@ func NewHealthHandler(db *gorm.DB) *HealthHandler {
 	}
 }
 
-func (h *HealthHandler) RegisterRoutes(router *gin.Engine) {
+// RegisterRoutes registers health check routes
+// The router parameter can be either *gin.Engine or *gin.RouterGroup
+func (h *HealthHandler) RegisterRoutes(router gin.IRouter) {
 	router.GET("/health", h.HealthCheck)
 }
 

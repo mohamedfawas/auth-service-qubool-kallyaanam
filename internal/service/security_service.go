@@ -16,14 +16,6 @@ type SecurityConfig struct {
 	MinPasswordChars int
 }
 
-// SecurityService defines security-related operations
-type SecurityService interface {
-	SanitizeInput(ctx context.Context, input string) string
-	ValidatePassword(ctx context.Context, password string) (bool, string)
-	HashPassword(ctx context.Context, password string) (string, error)
-	VerifyPassword(ctx context.Context, hashedPassword, password string) bool
-}
-
 // Implementation of the SecurityService interface
 type securityService struct {
 	config SecurityConfig

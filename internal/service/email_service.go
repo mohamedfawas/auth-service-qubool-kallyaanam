@@ -19,12 +19,6 @@ type EmailConfig struct {
 	IsDevelopment bool
 }
 
-// EmailService defines the interface for email operations
-type EmailService interface {
-	// SendVerificationEmail sends verification email with OTP
-	SendVerificationEmail(ctx context.Context, to string, otp string) error
-}
-
 // Implementation of the EmailService interface
 type emailService struct {
 	config EmailConfig

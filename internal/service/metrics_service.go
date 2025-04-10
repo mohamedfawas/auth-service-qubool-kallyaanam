@@ -5,14 +5,6 @@ import (
 	"context"
 )
 
-// MetricsService defines methods for recording metrics
-type MetricsService interface {
-	IncRegistrationAttempt(ctx context.Context)
-	IncRegistrationSuccess(ctx context.Context)
-	IncRegistrationFailure(ctx context.Context, reason string)
-	RegistrationDuration(ctx context.Context, duration float64)
-}
-
 // NoOpMetricsService implements MetricsService with no-op functions
 type NoOpMetricsService struct{}
 

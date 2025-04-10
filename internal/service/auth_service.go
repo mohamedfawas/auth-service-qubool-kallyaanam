@@ -12,13 +12,6 @@ import (
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository"
 )
 
-// AuthService defines the interface for authentication operations
-type AuthService interface {
-	// Register registers a new user and sends verification OTP
-	Register(ctx context.Context, req *model.RegistrationRequest) (*model.RegistrationResponse, error)
-	// Add other methods as needed (login, verify, etc.)
-}
-
 // Implementation of the AuthService interface
 type authService struct {
 	userRepo        repository.UserRepository
