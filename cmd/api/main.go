@@ -4,20 +4,76 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/config"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/handler"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/middleware"
-	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository/postgres"
+	postgreRepo "github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository/postgres"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/util/logger"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/pkg/database"
 )
 
+// Add this function
+func createDBIfNotExists() error {
+	// Connect to default postgres database first
+	dbHost := os.Getenv("DB_HOST")
+	if dbHost == "" {
+		dbHost = "postgres"
+	}
+	dbPort := os.Getenv("DB_PORT")
+	if dbPort == "" {
+		dbPort = "5432"
+	}
+	dbUser := os.Getenv("DB_USER")
+	if dbUser == "" {
+		dbUser = "postgres"
+	}
+	dbPassword := os.Getenv("DB_PASSWORD")
+	if dbPassword == "" {
+		dbPassword = "postgres"
+	}
+
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=postgres sslmode=disable",
+		dbHost, dbPort, dbUser, dbPassword)
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		return err
+	}
+
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "auth_db"
+	}
+
+	// Check if database exists
+	var count int64
+	db.Raw("SELECT COUNT(*) FROM pg_database WHERE datname = ?", dbName).Scan(&count)
+
+	// Create database if it doesn't exist
+	if count == 0 {
+		log.Printf("Creating database: %s", dbName)
+		createSQL := fmt.Sprintf("CREATE DATABASE %s", dbName)
+		if err := db.Exec(createSQL).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func main() {
+	// Add this line at the beginning of main()
+	if err := createDBIfNotExists(); err != nil {
+		log.Printf("Error creating database: %v", err)
+	}
 	// Load configuration
 	cfg := config.NewConfig()
 
@@ -34,7 +90,7 @@ func main() {
 	}
 
 	// Initialize repositories
-	userRepo := postgres.NewUserRepository(db)
+	userRepo := postgreRepo.NewUserRepository(db)
 
 	// Initialize services
 	otpService := service.NewOTPService(service.OTPConfig{
@@ -97,7 +153,7 @@ func main() {
 	)
 
 	// Health check handler
-	healthHandler := handler.NewHealthHandler()
+	healthHandler := handler.NewHealthHandler(db)
 
 	// Setup routes
 	healthHandler.RegisterRoutes(router)
