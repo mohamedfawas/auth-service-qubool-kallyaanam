@@ -78,35 +78,28 @@ func (l *Logger) RegistrationFailure(email string, ipAddress string, reason stri
 	)
 }
 
-// VerificationAttempt logs an attempt to verify email
+// Add these methods to the Logger struct
 func (l *Logger) VerificationAttempt(email, ip, userAgent string) {
 	l.Info("Email verification attempt",
-		l.Field("email", email),
-		l.Field("ip", ip),
-		l.Field("user_agent", userAgent),
-		l.Field("event", "verification_attempt"),
-	)
+		zap.String("email", email),
+		zap.String("ip", ip),
+		zap.String("userAgent", userAgent))
 }
 
-// VerificationSuccess logs a successful email verification
 func (l *Logger) VerificationSuccess(email, ip string) {
 	l.Info("Email verification successful",
-		l.Field("email", email),
-		l.Field("ip", ip),
-		l.Field("event", "verification_success"),
-	)
+		zap.String("email", email),
+		zap.String("ip", ip))
 }
 
-// VerificationFailure logs a failed email verification
 func (l *Logger) VerificationFailure(email, ip, reason string, fields ...zap.Field) {
-	logFields := []zap.Field{
-		l.Field("email", email),
-		l.Field("ip", ip),
-		l.Field("reason", reason),
-		l.Field("event", "verification_failure"),
+	allFields := []zap.Field{
+		zap.String("email", email),
+		zap.String("ip", ip),
+		zap.String("reason", reason),
 	}
-	logFields = append(logFields, fields...)
-	l.Warn("Email verification failed", logFields...)
+	allFields = append(allFields, fields...)
+	l.Error("Email verification failed", allFields...)
 }
 
 // maskEmail partially masks an email for privacy

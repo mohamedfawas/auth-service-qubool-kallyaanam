@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/middleware"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/model/dto"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/util/logger"
@@ -39,15 +39,9 @@ func NewAuthHandler(
 }
 
 func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup) {
-	// Create verification-specific rate limiter
-	verificationRateLimiter := middleware.VerificationRateLimiter(middleware.VerificationRateLimiterConfig{
-		MaxAttemptsPerPeriod: 5,
-		PeriodMinutes:        15,
-		BlockDurationMinutes: 60,
-	}, h.logger)
 
 	router.POST("/register", h.Register)
-	router.POST("/verify-email", verificationRateLimiter, h.VerifyEmail)
+	router.POST("/verify-email", h.VerifyEmail)
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -138,38 +132,46 @@ func (e *ValidationError) Error() string {
 
 // internal/handler/auth_handler.go - Update VerifyEmail handler
 
+// internal/handler/auth_handler.go
+
 // VerifyEmail handles the email verification endpoint
 func (h *AuthHandler) VerifyEmail(c *gin.Context) {
+	// Add request ID for tracing
+	requestID := uuid.New().String()
+	ctx := context.WithValue(c.Request.Context(), "request_id", requestID)
+	c.Request = c.Request.WithContext(ctx)
+
 	start := time.Now().UTC()
 
-	// Extract client info for logging and context
+	// Extract client info for logging
 	clientIP := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 
-	// Create context with client info
-	ctx := context.WithValue(c.Request.Context(), "client_ip", clientIP)
-	ctx = context.WithValue(ctx, "request_start_time", start)
-	ctx = context.WithValue(ctx, "user_agent", userAgent)
+	// Start metrics tracking
+	h.metricsService.IncVerificationAttempt(c)
 
 	// Log verification attempt
 	h.logger.VerificationAttempt("", clientIP, userAgent)
+	h.logger.Info("Request ID for verification attempt",
+		h.logger.Field("request_id", requestID))
 
 	// Parse and validate request
-	var request model.VerifyEmailRequest
+	var request dto.VerifyEmailRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		h.metricsService.IncVerificationFailure(c, "invalid_request")
 		h.logger.VerificationFailure("", clientIP, "invalid_request",
-			h.logger.Field("error", err))
-		response.BadRequest(c, "Invalid request", err)
+			h.logger.Field("error", err.Error()),
+			h.logger.Field("request_id", requestID))
+		response.BadRequest(c, "Invalid request", nil) // Don't expose validation errors
 		return
 	}
 
-	// Sanitize inputs
-	request.Email = h.securityService.SanitizeInput(ctx, request.Email)
-	request.OTP = h.securityService.SanitizeInput(ctx, request.OTP)
+	// Sanitize inputs to prevent attacks
+	request.Email = h.securityService.SanitizeInput(c, request.Email)
+	request.OTP = h.securityService.SanitizeInput(c, request.OTP)
 
 	// Verify the email
-	verifyResp, err := h.authService.VerifyEmail(ctx, &request)
+	verifyResp, err := h.authService.VerifyEmail(c, &request)
 
 	// Record metrics for the duration
 	duration := time.Since(start).Seconds()
@@ -178,41 +180,60 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 	// Handle response based on result
 	if err != nil {
 		var statusCode int
+		var errorType string
 		var errorMsg string
 
-		// Determine appropriate status code and error message based on error
-		// Use specific error cases but don't expose internal details
+		// Map internal errors to user-friendly messages
+		// without exposing sensitive details
 		switch {
-		case strings.Contains(err.Error(), "no pending registration"):
+		case strings.Contains(err.Error(), "no pending registration") ||
+			strings.Contains(err.Error(), "OTP expired") ||
+			strings.Contains(err.Error(), "not found"):
 			statusCode = http.StatusNotFound
-			errorMsg = "No verification in progress for this email"
+			errorType = "verification_not_found"
+			errorMsg = "Verification request not found or expired"
 		case strings.Contains(err.Error(), "invalid OTP"):
 			statusCode = http.StatusBadRequest
+			errorType = "invalid_otp"
 			errorMsg = "Invalid verification code"
-		case strings.Contains(err.Error(), "expired"):
+		case strings.Contains(err.Error(), "registration has expired"):
 			statusCode = http.StatusGone
-			errorMsg = "Verification expired, please register again"
-		case strings.Contains(err.Error(), "user already exists"):
+			errorType = "registration_expired"
+			errorMsg = "Registration has expired, please register again"
+		case strings.Contains(err.Error(), "account already exists"):
 			statusCode = http.StatusConflict
-			errorMsg = "Account already exists"
-		case strings.Contains(err.Error(), "unavailable"):
-			statusCode = http.StatusServiceUnavailable
-			errorMsg = "Service temporarily unavailable, please try again later"
+			errorType = "already_verified"
+			errorMsg = "This email is already verified"
 		default:
 			statusCode = http.StatusInternalServerError
-			errorMsg = "Failed to complete verification"
+			errorType = "server_error"
+			errorMsg = "Failed to verify email"
 		}
 
-		// Send secure error response that doesn't expose details
-		response.Error(c, statusCode, errorMsg, &ResponseError{Message: errorMsg})
+		h.metricsService.IncVerificationFailure(c, errorType)
+		h.logger.VerificationFailure(request.Email, clientIP, errorType,
+			h.logger.Field("status_code", statusCode),
+			h.logger.Field("request_id", requestID),
+			h.logger.Field("duration_seconds", duration))
+
+		// Send generalized error response - never expose internal error details
+		response.Error(c, statusCode, errorMsg, nil)
 		return
 	}
 
+	// Log successful verification
+	h.metricsService.IncVerificationSuccess(c)
+	h.logger.VerificationSuccess(request.Email, clientIP)
+	// Log additional details separately
+	h.logger.Info("Verification succeeded with details",
+		h.logger.Field("user_id", verifyResp.ID),
+		h.logger.Field("request_id", requestID),
+		h.logger.Field("duration_seconds", duration))
+
 	// Return standardized success response
 	response.Success(c, "Email verification successful", gin.H{
-		"id":      verifyResp.ID,
-		"email":   verifyResp.Email,
-		"message": verifyResp.Message,
+		"id":    verifyResp.ID,
+		"email": verifyResp.Email,
 	})
 }
 

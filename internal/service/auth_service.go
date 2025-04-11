@@ -142,74 +142,59 @@ func (s *authService) Register(ctx context.Context, req *dto.RegistrationRequest
 
 // internal/service/auth_service.go - Improve VerifyEmail method
 
+// internal/service/auth_service.go
+
 // VerifyEmail verifies email using OTP and transfers pending registration to users table
 func (s *authService) VerifyEmail(ctx context.Context, req *dto.VerifyEmailRequest) (*dto.VerifyEmailResponse, error) {
-	// Add context with timeout to prevent long-running operations
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	// Extract client info for logging
+	clientIP := getClientIP(ctx)
+	startTime := getRequestStartTime(ctx)
 
-	// Track verification activity
-	s.metricsService.IncVerificationAttempt(ctx)
+	s.logger.Info("Email verification attempt",
+		s.logger.Field("email", req.Email),
+		s.logger.Field("ip", clientIP),
+		s.logger.Field("request_id", ctx.Value("request_id")))
 
 	// 1. Verify the OTP
 	isValid, err := s.otpService.VerifyOTP(ctx, req.Email, req.OTP)
 	if err != nil {
-		// Log the error with appropriate classification
-		s.logger.VerificationFailure(req.Email, getClientIP(ctx), "otp_verification_error",
-			s.logger.Field("error", err))
-		s.metricsService.IncVerificationFailure(ctx, "otp_verification_error")
-
-		// Return appropriate error based on the specific error
-		if errors.Is(err, redis.ErrRedisUnavailable) {
-			return nil, errors.New("verification service temporarily unavailable")
+		if errors.Is(err, redis.ErrOTPNotFound) {
+			s.logger.VerificationFailure(req.Email, clientIP, "otp_expired")
+			return nil, errors.New("OTP expired or not found")
 		}
-		return nil, fmt.Errorf("error verifying OTP: %w", err)
+		s.logger.VerificationFailure(req.Email, clientIP, "otp_verification_error",
+			s.logger.Field("error", err.Error()))
+		return nil, fmt.Errorf("error verifying OTP")
 	}
 
 	if !isValid {
-		s.logger.VerificationFailure(req.Email, getClientIP(ctx), "invalid_otp")
-		s.metricsService.IncVerificationFailure(ctx, "invalid_otp")
+		s.logger.VerificationFailure(req.Email, clientIP, "invalid_otp")
 		return nil, errors.New("invalid OTP")
 	}
 
-	// 2. Retrieve the pending registration
-	pendingReg, err := s.userRepo.GetPendingRegistrationByEmail(ctx, req.Email)
+	// 2. Retrieve the pending registration with row locking to prevent race conditions
+	pendingReg, err := s.userRepo.GetPendingRegistrationByEmailWithLock(ctx, req.Email)
 	if err != nil {
-		s.logger.VerificationFailure(req.Email, getClientIP(ctx), "database_error",
-			s.logger.Field("error", err))
-		s.metricsService.IncVerificationFailure(ctx, "database_error")
-		return nil, fmt.Errorf("error retrieving pending registration: %w", err)
+		s.logger.VerificationFailure(req.Email, clientIP, "database_error",
+			s.logger.Field("error", err.Error()))
+		return nil, fmt.Errorf("error retrieving pending registration")
 	}
 
 	if pendingReg == nil {
-		s.logger.VerificationFailure(req.Email, getClientIP(ctx), "no_pending_registration")
-		s.metricsService.IncVerificationFailure(ctx, "no_pending_registration")
+		s.logger.VerificationFailure(req.Email, clientIP, "no_pending_registration")
 		return nil, errors.New("no pending registration found")
 	}
 
 	// 3. Check if the registration has expired
 	if time.Now().After(pendingReg.ExpiresAt) {
-		s.logger.VerificationFailure(req.Email, getClientIP(ctx), "registration_expired",
-			s.logger.Field("expires_at", pendingReg.ExpiresAt))
-		s.metricsService.IncVerificationFailure(ctx, "registration_expired")
-
-		// Clean up expired registration
-		go func(id uuid.UUID) {
-			// Use background context with timeout
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := s.userRepo.DeletePendingRegistration(cleanupCtx, id); err != nil {
-				s.logger.Warn("Failed to clean up expired registration",
-					s.logger.Field("id", id.String()),
-					s.logger.Field("error", err))
-			}
-		}(pendingReg.ID)
-
+		s.logger.VerificationFailure(req.Email, clientIP, "registration_expired")
 		return nil, errors.New("registration has expired")
 	}
 
 	// 4. Create a new user and remove pending registration within a transaction
 	var userID uuid.UUID
+
+	// Wrap transaction with detailed error handling and logging
 	err = s.userRepo.WithTransaction(ctx, func(txCtx context.Context) error {
 		// Create user from pending registration
 		user := &model.User{
@@ -224,19 +209,22 @@ func (s *authService) VerifyEmail(ctx context.Context, req *dto.VerifyEmailReque
 
 		// Save user in database
 		if err := s.userRepo.CreateUser(txCtx, user); err != nil {
-			// Check for unique constraint violations
-			if postgres.IsUniqueConstraintViolation(err, "users_email_key") {
-				return errors.New("email already exists in users table")
+			// Log internal details but don't expose them
+			s.logger.VerificationFailure(req.Email, clientIP, "user_creation_failed",
+				s.logger.Field("error", err.Error()))
+
+			if errors.Is(err, postgres.ErrDuplicateKey) {
+				return errors.New("account already exists")
 			}
-			if postgres.IsUniqueConstraintViolation(err, "users_phone_key") {
-				return errors.New("phone already exists in users table")
-			}
-			return fmt.Errorf("failed to create user: %w", err)
+
+			return fmt.Errorf("failed to create user") // Generalized user-facing error
 		}
 
 		// Delete pending registration
 		if err := s.userRepo.DeletePendingRegistration(txCtx, pendingReg.ID); err != nil {
-			return fmt.Errorf("failed to delete pending registration: %w", err)
+			s.logger.VerificationFailure(req.Email, clientIP, "pending_registration_deletion_failed",
+				s.logger.Field("error", err.Error()))
+			return fmt.Errorf("failed to complete verification process")
 		}
 
 		userID = user.ID
@@ -244,27 +232,20 @@ func (s *authService) VerifyEmail(ctx context.Context, req *dto.VerifyEmailReque
 	})
 
 	if err != nil {
-		// Log transaction errors
-		s.logger.VerificationFailure(req.Email, getClientIP(ctx), "transaction_error",
-			s.logger.Field("error", err))
-		s.metricsService.IncVerificationFailure(ctx, "transaction_error")
-
-		// Return appropriate error but don't expose internal details
-		if strings.Contains(err.Error(), "email already exists") ||
-			strings.Contains(err.Error(), "phone already exists") {
-			return nil, errors.New("user already exists with this email or phone")
+		// Don't expose internal errors to the client
+		if strings.Contains(err.Error(), "account already exists") {
+			return nil, errors.New("account already exists")
 		}
-
-		return nil, errors.New("verification failed due to database error")
+		return nil, errors.New("verification failed")
 	}
 
-	// Log successful verification
-	s.logger.VerificationSuccess(req.Email, getClientIP(ctx))
-	s.metricsService.IncVerificationSuccess(ctx)
-
-	// Record verification duration
-	duration := time.Since(getRequestStartTime(ctx)).Seconds()
-	s.metricsService.VerificationDuration(ctx, duration)
+	// Calculate and log processing time
+	processingTime := time.Since(startTime).Seconds()
+	s.logger.VerificationSuccess(req.Email, clientIP)
+	// Log additional data separately
+	s.logger.Info("Verification processing completed",
+		s.logger.Field("duration_seconds", processingTime),
+		s.logger.Field("user_id", userID.String()))
 
 	return &dto.VerifyEmailResponse{
 		ID:      userID.String(),

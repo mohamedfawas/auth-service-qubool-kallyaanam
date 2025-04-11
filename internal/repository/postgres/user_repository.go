@@ -100,11 +100,13 @@ func (r *UserRepository) CreateUser(ctx context.Context, user *model.User) error
 	return result.Error
 }
 
-// GetPendingRegistrationByEmailWithLock retrieves pending registration by email with row lock
+// internal/repository/postgres/user_repository.go
+
+// GetPendingRegistrationByEmailWithLock retrieves pending registration by email with row locking
 func (r *UserRepository) GetPendingRegistrationByEmailWithLock(ctx context.Context, email string) (*model.PendingRegistration, error) {
 	var pendingReg model.PendingRegistration
 
-	// Use FOR UPDATE to lock the row
+	// Use FOR UPDATE to lock the row and prevent concurrent modifications
 	result := r.db.WithContext(ctx).
 		Set("gorm:query_option", "FOR UPDATE").
 		Where("email = ?", email).

@@ -19,6 +19,7 @@ type UserRepository interface {
 	GetPendingRegistrationByEmail(ctx context.Context, email string) (*model.PendingRegistration, error)
 	DeletePendingRegistration(ctx context.Context, id uuid.UUID) error
 	CreateUser(ctx context.Context, user *model.User) error
+	GetPendingRegistrationByEmailWithLock(ctx context.Context, email string) (*model.PendingRegistration, error)
 
 	// WithTransaction executes operations within a transaction
 	WithTransaction(ctx context.Context, fn func(txCtx context.Context) error) error

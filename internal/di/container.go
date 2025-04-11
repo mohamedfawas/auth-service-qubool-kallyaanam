@@ -110,6 +110,8 @@ func Initialize() (*Container, error) {
 		otpService,
 		emailService,
 		securityService,
+		metricsService,
+		appLogger,
 	)
 
 	// Initialize Gin router
