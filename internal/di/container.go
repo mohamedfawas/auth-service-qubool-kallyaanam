@@ -12,9 +12,11 @@ import (
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/middleware"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository"
 	postgreRepo "github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository/postgres"
+	redisRepo "github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/repository/redis"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/service"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/util/logger"
 	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/pkg/database"
+	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/pkg/redis"
 )
 
 // Container holds all application dependencies
@@ -57,16 +59,27 @@ func Initialize() (*Container, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
+	// Initialize Redis connection
+	redisClient, err := redis.NewRedisClient(&cfg.Redis)
+	if err != nil {
+		appLogger.Warn("Failed to connect to Redis, OTP storage will be affected", appLogger.Field("error", err.Error()))
+		// Continue execution, we may still want to start the service
+	}
+
 	// Initialize repositories
 	var userRepo repository.UserRepository
 	userRepo = postgreRepo.NewUserRepository(db)
+
+	// Initialize OTP repository with Redis
+	var otpRepo repository.OTPRepository
+	otpRepo = redisRepo.NewOTPRepository(redisClient)
 
 	// Initialize services
 	var otpService service.OTPService
 	otpService = service.NewOTPService(service.OTPConfig{
 		Length:     cfg.OTP.Length,
 		ExpiryMins: cfg.OTP.ExpiryMins,
-	})
+	}, otpRepo)
 
 	var emailService service.EmailService
 	emailService, err = service.NewEmailService(service.EmailConfig{
@@ -128,7 +141,7 @@ func Initialize() (*Container, error) {
 	)
 
 	// Health check handler
-	healthHandler := handler.NewHealthHandler(db)
+	healthHandler := handler.NewHealthHandler(db, redisClient)
 
 	return &Container{
 		Config:     cfg,

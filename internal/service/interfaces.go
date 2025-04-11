@@ -5,23 +5,29 @@ import (
 	"context"
 	"time"
 
-	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/model"
+	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/internal/model/dto"
 )
 
 // AuthService defines the interface for authentication operations
 type AuthService interface {
 	// Register registers a new user and sends verification OTP
-	Register(ctx context.Context, req *model.RegistrationRequest) (*model.RegistrationResponse, error)
+	Register(ctx context.Context, req *dto.RegistrationRequest) (*dto.RegistrationResponse, error)
+	// VerifyEmail verifies email using OTP sent during registration
+	VerifyEmail(ctx context.Context, req *dto.VerifyEmailRequest) (*dto.VerifyEmailResponse, error)
 	// Additional methods would be added here (login, verify, etc.)
 }
 
+// internal/service/interfaces.go (update the OTPService interface)
 // OTPService defines the interface for OTP operations
 type OTPService interface {
 	// GenerateOTP generates a new OTP of specified length
 	GenerateOTP(ctx context.Context, length int) (string, error)
 	// GetOTPExpiryTime returns the configured expiry time for OTPs
 	GetOTPExpiryTime(ctx context.Context) time.Time
-	// Additional methods would be added here (validate OTP, etc.)
+	// GenerateAndStoreOTP generates a new OTP and stores it in Redis
+	GenerateAndStoreOTP(ctx context.Context, key string) (string, error)
+	// VerifyOTP verifies an OTP for a given key
+	VerifyOTP(ctx context.Context, key string, otp string) (bool, error)
 }
 
 // EmailService defines the interface for email operations
@@ -45,12 +51,15 @@ type SecurityService interface {
 
 // MetricsService defines methods for recording metrics
 type MetricsService interface {
-	// IncRegistrationAttempt increments the registration attempt counter
+	// Registration metrics
 	IncRegistrationAttempt(ctx context.Context)
-	// IncRegistrationSuccess increments the successful registration counter
 	IncRegistrationSuccess(ctx context.Context)
-	// IncRegistrationFailure increments the failed registration counter with a reason
 	IncRegistrationFailure(ctx context.Context, reason string)
-	// RegistrationDuration records the duration of a registration operation
-	RegistrationDuration(ctx context.Context, duration float64)
+	RegistrationDuration(ctx context.Context, seconds float64)
+
+	// Verification metrics
+	IncVerificationAttempt(ctx context.Context)
+	IncVerificationSuccess(ctx context.Context)
+	IncVerificationFailure(ctx context.Context, reason string)
+	VerificationDuration(ctx context.Context, seconds float64)
 }

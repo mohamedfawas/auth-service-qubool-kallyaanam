@@ -78,6 +78,37 @@ func (l *Logger) RegistrationFailure(email string, ipAddress string, reason stri
 	)
 }
 
+// VerificationAttempt logs an attempt to verify email
+func (l *Logger) VerificationAttempt(email, ip, userAgent string) {
+	l.Info("Email verification attempt",
+		l.Field("email", email),
+		l.Field("ip", ip),
+		l.Field("user_agent", userAgent),
+		l.Field("event", "verification_attempt"),
+	)
+}
+
+// VerificationSuccess logs a successful email verification
+func (l *Logger) VerificationSuccess(email, ip string) {
+	l.Info("Email verification successful",
+		l.Field("email", email),
+		l.Field("ip", ip),
+		l.Field("event", "verification_success"),
+	)
+}
+
+// VerificationFailure logs a failed email verification
+func (l *Logger) VerificationFailure(email, ip, reason string, fields ...zap.Field) {
+	logFields := []zap.Field{
+		l.Field("email", email),
+		l.Field("ip", ip),
+		l.Field("reason", reason),
+		l.Field("event", "verification_failure"),
+	}
+	logFields = append(logFields, fields...)
+	l.Warn("Email verification failed", logFields...)
+}
+
 // maskEmail partially masks an email for privacy
 func maskEmail(email string) string {
 	// Only implement basic masking in this version

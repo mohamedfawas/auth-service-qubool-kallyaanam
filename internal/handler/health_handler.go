@@ -2,19 +2,24 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mohamedfawas/qubool-kallyanam/auth-service-qubool-kallyaanam/pkg/redis"
 	"gorm.io/gorm"
 )
 
 type HealthHandler struct {
-	db *gorm.DB
+	db    *gorm.DB
+	redis *redis.Client
 }
 
-func NewHealthHandler(db *gorm.DB) *HealthHandler {
+func NewHealthHandler(db *gorm.DB, redisClient *redis.Client) *HealthHandler {
 	return &HealthHandler{
-		db: db,
+		db:    db,
+		redis: redisClient,
 	}
 }
 
@@ -25,31 +30,33 @@ func (h *HealthHandler) RegisterRoutes(router gin.IRouter) {
 }
 
 func (h *HealthHandler) HealthCheck(c *gin.Context) {
-	// Add database connection check
-	sqlDB, err := h.db.DB() // Get the underlying SQL DB
-	dbStatus := "UP"
-	dbDetails := map[string]string{}
-
-	if err != nil {
-		dbStatus = "DOWN"
-		dbDetails["error"] = err.Error()
-	} else {
-		// Check DB connection
-		if err := sqlDB.Ping(); err != nil {
-			dbStatus = "DOWN"
-			dbDetails["error"] = err.Error()
-		}
+	healthStatus := map[string]interface{}{
+		"status":    "up",
+		"timestamp": time.Now().Format(time.RFC3339),
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "UP",
-		"service": "auth-service",
-		"version": "1.0.0",
-		"dependencies": map[string]interface{}{
-			"postgres": map[string]interface{}{
-				"status":  dbStatus,
-				"details": dbDetails,
-			},
-		},
-	})
+	// Check database connection
+	if err := h.db.Raw("SELECT 1").Error; err != nil {
+		healthStatus["status"] = "down"
+		healthStatus["database"] = "error: " + err.Error()
+	} else {
+		healthStatus["database"] = "up"
+	}
+
+	// Check Redis connection if enabled
+	if h.redis != nil {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		if err := h.redis.Healthcheck(ctx); err != nil {
+			healthStatus["status"] = "down"
+			healthStatus["redis"] = "error: " + err.Error()
+		} else {
+			healthStatus["redis"] = "up"
+		}
+	} else {
+		healthStatus["redis"] = "disabled"
+	}
+
+	c.JSON(http.StatusOK, healthStatus)
 }

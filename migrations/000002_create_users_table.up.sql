@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMP,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     CONSTRAINT users_email_unique UNIQUE (email),
     CONSTRAINT users_phone_unique UNIQUE (phone)
 );

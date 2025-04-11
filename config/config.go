@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ type Config struct {
 	Security     SecurityConfig
 	RateLimiting RateLimitingConfig
 	Logging      LoggingConfig
+	Redis        RedisConfig
 }
 
 // Validate checks if the configuration is valid
@@ -61,6 +63,11 @@ func (c *Config) Validate() error {
 
 	// Validate RateLimiting config
 	if err := c.RateLimiting.Validate(); err != nil {
+		return err
+	}
+
+	// Validate Redis config
+	if err := c.Redis.Validate(); err != nil {
 		return err
 	}
 
@@ -208,11 +215,80 @@ func (c *LoggingConfig) Validate() error {
 	return nil
 }
 
+// RedisConfig holds configuration for Redis connection
+type RedisConfig struct {
+	Address  string
+	Password string
+	DB       int
+	Enabled  bool
+}
+
+// Parse parses a Redis URI into RedisConfig
+func (c *RedisConfig) Parse(uri string) error {
+	if uri == "" {
+		return nil
+	}
+
+	// Parse the Redis URI
+	u, err := url.Parse(uri)
+	if err != nil {
+		return err
+	}
+
+	// Extract host and port
+	c.Address = u.Host
+
+	// Extract password if present
+	if u.User != nil {
+		c.Password, _ = u.User.Password()
+	}
+
+	// Extract database number
+	if len(u.Path) > 1 {
+		dbStr := strings.TrimPrefix(u.Path, "/")
+		db, err := strconv.Atoi(dbStr)
+		if err == nil {
+			c.DB = db
+		}
+	}
+
+	c.Enabled = true
+	return nil
+}
+
+// Validate checks if the redis configuration is valid
+func (c *RedisConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+
+	if c.Address == "" {
+		return &ValidationError{Field: "Redis.Address", Message: "cannot be empty when Redis is enabled"}
+	}
+
+	return nil
+}
+
 // NewConfig creates and initializes a new Config instance
 func NewConfig() (*Config, error) {
 	// Load environment variables from .env file if it exists
 	// Only load in development mode and don't fail if file is missing
 	_ = godotenv.Load()
+	redisConfig := RedisConfig{
+		Address:  getEnv("REDIS_ADDRESS", "localhost:6379"),
+		Password: getEnv("REDIS_PASSWORD", ""),
+		DB:       getIntEnv("REDIS_DB", 0),
+		Enabled:  true,
+	}
+
+	// Try to parse from REDIS_URI if available
+	redisURI := getEnv("REDIS_URI", "")
+	if redisURI != "" {
+		if err := redisConfig.Parse(redisURI); err != nil {
+			// Just log the error, don't return
+			fmt.Printf("Failed to parse REDIS_URI: %v, using default settings\n", err)
+		}
+	}
 
 	// Create config with defaults and environment variable overrides
 	config := &Config{
@@ -245,6 +321,7 @@ func NewConfig() (*Config, error) {
 			IsDevelopment: getEnv("APP_ENV", "development") == "development",
 			LogLevel:      getEnv("LOG_LEVEL", "info"),
 		},
+		Redis: redisConfig,
 	}
 
 	// Validate the configuration

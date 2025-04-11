@@ -8,8 +8,6 @@ CREATE TABLE IF NOT EXISTS pending_registrations (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMP NOT NULL,
-    otp VARCHAR(10) NOT NULL,
-    otp_expiry TIMESTAMP NOT NULL,
     CONSTRAINT pending_registrations_email_unique UNIQUE (email),
     CONSTRAINT pending_registrations_phone_unique UNIQUE (phone)
 );
