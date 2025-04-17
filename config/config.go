@@ -359,7 +359,6 @@ func LoadConfig() (*Config, error) {
 	v.SetDefault("REDIS_DB", 0)
 
 	// JWT config
-	v.SetDefault("JWT_SECRET", "default-insecure-jwt-secret-please-change-in-production")
 	v.SetDefault("JWT_TOKEN_EXPIRY", "15m")
 	v.SetDefault("JWT_REFRESH_EXPIRY", "24h")
 	v.SetDefault("JWT_ISSUER", "qubool-kallyaanam-auth")
