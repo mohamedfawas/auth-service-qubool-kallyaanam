@@ -31,12 +31,16 @@ type securityService struct {
 	redisService RedisService
 }
 
-// NewSecurityService creates a new security service instance
-func NewSecurityService(config SecurityConfig, redisService RedisService) SecurityService {
+func NewSecurityService(config SecurityConfig, redisService RedisService) (SecurityService, error) {
+	// Validate JWT secret length (at least 32 characters)
+	if len(config.JWTSecret) < 32 {
+		return nil, fmt.Errorf("JWT secret is too short, must be at least 32 characters")
+	}
+
 	return &securityService{
 		config:       config,
 		redisService: redisService,
-	}
+	}, nil
 }
 
 // SanitizeInput cleans input to prevent XSS
@@ -126,6 +130,9 @@ func (s *securityService) GenerateJWT(ctx context.Context, userID, role string, 
 	// Create the token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
+	// Set header values for better security
+	token.Header["kid"] = "auth-key-1" // Key ID for future key rotation
+
 	// Sign the token with the secret key
 	tokenString, err := token.SignedString([]byte(s.config.JWTSecret))
 	if err != nil {
@@ -150,8 +157,11 @@ func (s *securityService) GenerateRefreshToken(ctx context.Context, userID strin
 		"typ": "refresh",                                     // Token type
 	}
 
-	// Create the token
+	// Create the token with explicit HS256 method
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Set header values for better security
+	token.Header["kid"] = "refresh-key-1" // Key ID for future key rotation
 
 	// Sign the token with the secret key
 	tokenString, err := token.SignedString([]byte(s.config.JWTSecret))

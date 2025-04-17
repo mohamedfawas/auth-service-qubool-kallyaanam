@@ -106,7 +106,7 @@ func Initialize() (*Container, error) {
 	}
 
 	var securityService service.SecurityService
-	securityService = service.NewSecurityService(service.SecurityConfig{
+	securityService, err = service.NewSecurityService(service.SecurityConfig{
 		BcryptCost:       cfg.Security.BcryptCost,
 		MinPasswordChars: cfg.Security.MinPasswordChars,
 		JWTSecret:        cfg.Security.JWTSecret,
@@ -114,6 +114,10 @@ func Initialize() (*Container, error) {
 		RefreshExpiry:    time.Duration(cfg.Security.RefreshTokenExpiryHours) * time.Hour,
 		Issuer:           cfg.Security.TokenIssuer,
 	}, redisService)
+	if err != nil {
+		appLogger.Fatal("Failed to initialize security service", appLogger.Field("error", err.Error()))
+		return nil, fmt.Errorf("failed to initialize security service: %w", err)
+	}
 
 	// Use no-op metrics service
 	var metricsService service.MetricsService
