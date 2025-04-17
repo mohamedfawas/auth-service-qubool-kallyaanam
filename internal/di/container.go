@@ -32,6 +32,7 @@ type Container struct {
 	EmailService    service.EmailService
 	SecurityService service.SecurityService
 	MetricsService  service.MetricsService
+	RedisService    service.RedisService
 
 	// Handlers
 	AuthHandler   *handler.AuthHandler
@@ -74,6 +75,17 @@ func Initialize() (*Container, error) {
 	var otpRepo repository.OTPRepository
 	otpRepo = redisRepo.NewOTPRepository(redisClient)
 
+	// Initialize Redis service
+	var redisService service.RedisService
+	redisService = service.NewRedisService(service.RedisServiceConfig{
+		Address:      cfg.Redis.Address,
+		Password:     cfg.Redis.Password,
+		DB:           cfg.Redis.DB,
+		TokenExpiry:  time.Duration(cfg.Security.RefreshTokenExpiryHours) * time.Hour,
+		ThrottleRate: cfg.Security.LoginAttemptsThreshold,
+		ThrottleTTL:  time.Duration(cfg.Security.LoginThrottleDurationMinutes) * time.Minute,
+	}, appLogger)
+
 	// Initialize services
 	var otpService service.OTPService
 	otpService = service.NewOTPService(service.OTPConfig{
@@ -97,7 +109,11 @@ func Initialize() (*Container, error) {
 	securityService = service.NewSecurityService(service.SecurityConfig{
 		BcryptCost:       cfg.Security.BcryptCost,
 		MinPasswordChars: cfg.Security.MinPasswordChars,
-	})
+		JWTSecret:        cfg.Security.JWTSecret,
+		TokenExpiry:      time.Duration(cfg.Security.AccessTokenExpiryMinutes) * time.Minute,
+		RefreshExpiry:    time.Duration(cfg.Security.RefreshTokenExpiryHours) * time.Hour,
+		Issuer:           cfg.Security.TokenIssuer,
+	}, redisService)
 
 	// Use no-op metrics service
 	var metricsService service.MetricsService
@@ -112,6 +128,7 @@ func Initialize() (*Container, error) {
 		securityService,
 		metricsService,
 		appLogger,
+		redisService,
 	)
 
 	// Initialize Gin router
@@ -157,6 +174,7 @@ func Initialize() (*Container, error) {
 		EmailService:    emailService,
 		SecurityService: securityService,
 		MetricsService:  metricsService,
+		RedisService:    redisService,
 
 		// Handlers
 		AuthHandler:   authHandler,

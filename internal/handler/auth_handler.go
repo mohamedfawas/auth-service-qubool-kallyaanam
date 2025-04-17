@@ -42,6 +42,9 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup) {
 
 	router.POST("/register", h.Register)
 	router.POST("/verify-email", h.VerifyEmail)
+	router.POST("/login", h.Login)
+	router.POST("/refresh-token", h.RefreshToken)
+	router.POST("/logout", h.Logout)
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -244,4 +247,246 @@ type ResponseError struct {
 
 func (e *ResponseError) Error() string {
 	return e.Message
+}
+
+// Add to auth_handler.go
+
+// Login handles the user login endpoint
+func (h *AuthHandler) Login(c *gin.Context) {
+	start := time.Now().UTC()
+
+	// Extract client info for logging
+	clientIP := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+	requestID := uuid.New().String()
+
+	// Add request ID to context for tracing
+	ctx := context.WithValue(c.Request.Context(), "request_id", requestID)
+	c.Request = c.Request.WithContext(ctx)
+
+	// Start metrics tracking
+	h.metricsService.IncLoginAttempt(ctx)
+
+	// Log login attempt (without credentials)
+	h.logger.Info("Login attempt",
+		h.logger.Field("client_ip", clientIP),
+		h.logger.Field("user_agent", userAgent),
+		h.logger.Field("request_id", requestID))
+
+	// Parse and validate request
+	var request dto.LoginRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		h.metricsService.IncLoginFailure(ctx, "invalid_request")
+		h.logger.Warn("Login failure: invalid request",
+			h.logger.Field("error", err.Error()),
+			h.logger.Field("client_ip", clientIP),
+			h.logger.Field("request_id", requestID))
+		response.BadRequest(c, "Invalid request format", nil)
+		return
+	}
+
+	// Sanitize inputs
+	request.Email = h.securityService.SanitizeInput(ctx, request.Email)
+
+	// Perform login
+	loginResp, err := h.authService.Login(ctx, &request)
+
+	// Record metrics for the duration
+	duration := time.Since(start).Seconds()
+	h.metricsService.LoginDuration(ctx, duration)
+
+	// Handle response based on result
+	if err != nil {
+		var statusCode int
+		var errorType string
+		var errorMsg string
+
+		// Map internal errors to user-friendly messages
+		switch {
+		case strings.Contains(err.Error(), "not found") ||
+			strings.Contains(err.Error(), "invalid credentials"):
+			statusCode = http.StatusUnauthorized
+			errorType = "invalid_credentials"
+			errorMsg = "Invalid email or password"
+		case strings.Contains(err.Error(), "not verified"):
+			statusCode = http.StatusForbidden
+			errorType = "unverified_account"
+			errorMsg = "Email not verified. Please verify your email first"
+		default:
+			statusCode = http.StatusInternalServerError
+			errorType = "server_error"
+			errorMsg = "Authentication failed"
+		}
+
+		h.metricsService.IncLoginFailure(ctx, errorType)
+		h.logger.Warn("Login failure",
+			h.logger.Field("error_type", errorType),
+			h.logger.Field("email", request.Email),
+			h.logger.Field("client_ip", clientIP),
+			h.logger.Field("request_id", requestID))
+
+		response.Error(c, statusCode, errorMsg, nil)
+		return
+	}
+
+	// Log successful login
+	h.metricsService.IncLoginSuccess(ctx)
+	h.logger.Info("Login successful",
+		h.logger.Field("email", request.Email),
+		h.logger.Field("client_ip", clientIP),
+		h.logger.Field("request_id", requestID))
+
+	// Return standardized response
+	response.Success(c, "Login successful", loginResp)
+}
+
+// Add these methods to the AuthHandler
+
+// RefreshToken handles the token refresh endpoint
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	start := time.Now().UTC()
+
+	// Extract client info for logging
+	clientIP := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+	requestID := uuid.New().String()
+
+	// Add request ID to context for tracing
+	ctx := context.WithValue(c.Request.Context(), "request_id", requestID)
+	ctx = context.WithValue(ctx, "client_ip", clientIP)
+	ctx = context.WithValue(ctx, "user_agent", userAgent)
+	c.Request = c.Request.WithContext(ctx)
+
+	// Start metrics tracking
+	h.metricsService.IncTokenRefreshAttempt(ctx)
+
+	// Log token refresh attempt
+	h.logger.Info("Token refresh attempt",
+		h.logger.Field("client_ip", clientIP),
+		h.logger.Field("user_agent", userAgent),
+		h.logger.Field("request_id", requestID))
+
+	// Parse and validate request
+	var request dto.RefreshTokenRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		h.metricsService.IncTokenRefreshFailure(ctx, "invalid_request")
+		h.logger.Warn("Token refresh failure: invalid request",
+			h.logger.Field("error", err.Error()),
+			h.logger.Field("client_ip", clientIP),
+			h.logger.Field("request_id", requestID))
+		response.BadRequest(c, "Invalid request format", nil)
+		return
+	}
+
+	// Perform token refresh
+	refreshResp, err := h.authService.RefreshToken(ctx, &request)
+
+	// Record metrics for the duration
+	duration := time.Since(start).Seconds()
+	h.metricsService.TokenRefreshDuration(ctx, duration)
+
+	// Handle response based on result
+	if err != nil {
+		var statusCode int
+		var errorType string
+		var errorMsg string
+
+		// Map internal errors to user-friendly messages
+		switch {
+		case strings.Contains(err.Error(), "not found") ||
+			strings.Contains(err.Error(), "expired"):
+			statusCode = http.StatusUnauthorized
+			errorType = "invalid_token"
+			errorMsg = "Refresh token is invalid or expired"
+		case strings.Contains(err.Error(), "revoked"):
+			statusCode = http.StatusUnauthorized
+			errorType = "token_revoked"
+			errorMsg = "Token has been revoked"
+		default:
+			statusCode = http.StatusInternalServerError
+			errorType = "server_error"
+			errorMsg = "Failed to refresh token"
+		}
+
+		h.metricsService.IncTokenRefreshFailure(ctx, errorType)
+		h.logger.Warn("Token refresh failure",
+			h.logger.Field("error_type", errorType),
+			h.logger.Field("client_ip", clientIP),
+			h.logger.Field("request_id", requestID))
+
+		response.Error(c, statusCode, errorMsg, nil)
+		return
+	}
+
+	// Log successful token refresh
+	h.metricsService.IncTokenRefreshSuccess(ctx)
+	h.logger.Info("Token refresh successful",
+		h.logger.Field("client_ip", clientIP),
+		h.logger.Field("request_id", requestID))
+
+	// Return standardized response
+	response.Success(c, "Token refreshed successfully", refreshResp)
+}
+
+// Logout handles the logout endpoint
+func (h *AuthHandler) Logout(c *gin.Context) {
+	start := time.Now().UTC()
+
+	// Extract client info for logging
+	clientIP := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+	requestID := uuid.New().String()
+
+	// Add request ID to context for tracing
+	ctx := context.WithValue(c.Request.Context(), "request_id", requestID)
+	c.Request = c.Request.WithContext(ctx)
+
+	// Start metrics tracking
+	h.metricsService.IncLogoutAttempt(ctx)
+
+	// Log logout attempt
+	h.logger.Info("Logout attempt",
+		h.logger.Field("client_ip", clientIP),
+		h.logger.Field("user_agent", userAgent),
+		h.logger.Field("request_id", requestID))
+
+	// Parse and validate request
+	var request dto.LogoutRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		h.metricsService.IncLogoutFailure(ctx, "invalid_request")
+		h.logger.Warn("Logout failure: invalid request",
+			h.logger.Field("error", err.Error()),
+			h.logger.Field("client_ip", clientIP),
+			h.logger.Field("request_id", requestID))
+		response.BadRequest(c, "Invalid request format", nil)
+		return
+	}
+
+	// Perform logout
+	err := h.authService.Logout(ctx, &request)
+
+	// Record metrics for the duration
+	duration := time.Since(start).Seconds()
+	h.metricsService.LogoutDuration(ctx, duration)
+
+	// Handle response based on result
+	if err != nil {
+		h.metricsService.IncLogoutFailure(ctx, "invalid_token")
+		h.logger.Warn("Logout failure",
+			h.logger.Field("error", err.Error()),
+			h.logger.Field("client_ip", clientIP),
+			h.logger.Field("request_id", requestID))
+
+		response.Error(c, http.StatusUnauthorized, "Invalid tokens", nil)
+		return
+	}
+
+	// Log successful logout
+	h.metricsService.IncLogoutSuccess(ctx)
+	h.logger.Info("Logout successful",
+		h.logger.Field("client_ip", clientIP),
+		h.logger.Field("request_id", requestID))
+
+	// Return standardized response
+	response.Success(c, "Logged out successfully", nil)
 }

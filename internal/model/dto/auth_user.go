@@ -24,3 +24,16 @@ type VerifyEmailResponse struct {
 	Email   string `json:"email"`
 	Message string `json:"message"`
 }
+
+// LoginRequest represents the request for user login
+type LoginRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
+// LoginResponse represents the response after successful login
+type LoginResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	UserRole     string `json:"user_role"`
+}

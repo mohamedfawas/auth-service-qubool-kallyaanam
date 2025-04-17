@@ -8,8 +8,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 // ValidationError represents a configuration validation error
@@ -32,6 +34,7 @@ type Config struct {
 	RateLimiting RateLimitingConfig
 	Logging      LoggingConfig
 	Redis        RedisConfig
+	JWT          JWTConfig
 }
 
 // Validate checks if the configuration is valid
@@ -68,6 +71,11 @@ func (c *Config) Validate() error {
 
 	// Validate Redis config
 	if err := c.Redis.Validate(); err != nil {
+		return err
+	}
+
+	// Validate JWT config
+	if err := c.JWT.Validate(); err != nil {
 		return err
 	}
 
@@ -156,8 +164,14 @@ func (c *OTPConfig) Validate() error {
 
 // SecurityConfig holds security-related configuration
 type SecurityConfig struct {
-	BcryptCost       int
-	MinPasswordChars int
+	BcryptCost                   int    `mapstructure:"bcrypt_cost"`
+	MinPasswordChars             int    `mapstructure:"min_password_chars"`
+	JWTSecret                    string `mapstructure:"jwt_secret"`
+	AccessTokenExpiryMinutes     int    `mapstructure:"access_token_expiry_minutes"`
+	RefreshTokenExpiryHours      int    `mapstructure:"refresh_token_expiry_hours"`
+	TokenIssuer                  string `mapstructure:"token_issuer"`
+	LoginAttemptsThreshold       int    `mapstructure:"login_attempts_threshold"`
+	LoginThrottleDurationMinutes int    `mapstructure:"login_throttle_duration_minutes"`
 }
 
 // Validate checks if security configuration is valid
@@ -269,20 +283,97 @@ func (c *RedisConfig) Validate() error {
 	return nil
 }
 
-// NewConfig creates and initializes a new Config instance
-func NewConfig() (*Config, error) {
+// JWTConfig holds JWT-related configuration
+type JWTConfig struct {
+	Secret        string        `mapstructure:"secret"`
+	TokenExpiry   time.Duration `mapstructure:"token_expiry"`
+	RefreshExpiry time.Duration `mapstructure:"refresh_expiry"`
+	Issuer        string        `mapstructure:"issuer"`
+}
+
+// Validate checks if JWT configuration is valid
+func (c *JWTConfig) Validate() error {
+	if c.Secret == "" {
+		return &ValidationError{Field: "JWT.Secret", Message: "cannot be empty"}
+	}
+
+	return nil
+}
+
+// LoadConfig loads configuration using Viper
+func LoadConfig() (*Config, error) {
 	// Load environment variables from .env file if it exists
-	// Only load in development mode and don't fail if file is missing
 	_ = godotenv.Load()
+
+	// Initialize Viper
+	v := viper.New()
+	v.SetConfigName("config")
+	v.SetConfigType("env")
+	v.AddConfigPath(".")
+	v.AddConfigPath("./config")
+	v.AutomaticEnv()
+
+	// Read the config file if it exists (optional)
+	if err := v.ReadInConfig(); err != nil {
+		// We'll just use environment variables if the config file doesn't exist
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
+	}
+
+	// Server config
+	v.SetDefault("PORT", "8081")
+	v.SetDefault("REQUEST_TIMEOUT_SECONDS", 30)
+
+	// Database config
+	v.SetDefault("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=auth_service port=5432 sslmode=disable TimeZone=UTC")
+
+	// Email config
+	v.SetDefault("EMAIL_FROM_ADDRESS", "noreply@quboolkallyaanam.com")
+	v.SetDefault("EMAIL_FROM_NAME", "Qubool Kallyaanam")
+	v.SetDefault("OTP_EXPIRY_MINS", 15)
+	v.SetDefault("APP_ENV", "development")
+
+	// OTP config
+	v.SetDefault("OTP_LENGTH", 6)
+
+	// Security config
+	v.SetDefault("BCRYPT_COST", 12)
+	v.SetDefault("MIN_PASSWORD_CHARS", 8)
+	v.SetDefault("ACCESS_TOKEN_EXPIRY_MINUTES", 15)
+	v.SetDefault("REFRESH_TOKEN_EXPIRY_HOURS", 24)
+	v.SetDefault("TOKEN_ISSUER", "qubool-kallyaanam-auth")
+	v.SetDefault("LOGIN_ATTEMPTS_THRESHOLD", 5)
+	v.SetDefault("LOGIN_THROTTLE_DURATION_MINUTES", 15)
+
+	// Rate limiting config
+	v.SetDefault("RATE_LIMIT_MAX_REQUESTS", 5)
+	v.SetDefault("RATE_LIMIT_BLOCK_DURATION", 30)
+
+	// Logging config
+	v.SetDefault("LOG_LEVEL", "info")
+
+	// Redis config
+	v.SetDefault("REDIS_ADDRESS", "localhost:6379")
+	v.SetDefault("REDIS_PASSWORD", "")
+	v.SetDefault("REDIS_DB", 0)
+
+	// JWT config
+	v.SetDefault("JWT_SECRET", "default-insecure-jwt-secret-please-change-in-production")
+	v.SetDefault("JWT_TOKEN_EXPIRY", "15m")
+	v.SetDefault("JWT_REFRESH_EXPIRY", "24h")
+	v.SetDefault("JWT_ISSUER", "qubool-kallyaanam-auth")
+
+	// Create Redis config
 	redisConfig := RedisConfig{
-		Address:  getEnv("REDIS_ADDRESS", "localhost:6379"),
-		Password: getEnv("REDIS_PASSWORD", ""),
-		DB:       getIntEnv("REDIS_DB", 0),
+		Address:  v.GetString("REDIS_ADDRESS"),
+		Password: v.GetString("REDIS_PASSWORD"),
+		DB:       v.GetInt("REDIS_DB"),
 		Enabled:  true,
 	}
 
 	// Try to parse from REDIS_URI if available
-	redisURI := getEnv("REDIS_URI", "")
+	redisURI := v.GetString("REDIS_URI")
 	if redisURI != "" {
 		if err := redisConfig.Parse(redisURI); err != nil {
 			// Just log the error, don't return
@@ -290,38 +381,61 @@ func NewConfig() (*Config, error) {
 		}
 	}
 
+	// Parse token expiry durations
+	tokenExpiry, err := time.ParseDuration(v.GetString("JWT_TOKEN_EXPIRY"))
+	if err != nil {
+		tokenExpiry = 15 * time.Minute
+	}
+
+	refreshExpiry, err := time.ParseDuration(v.GetString("JWT_REFRESH_EXPIRY"))
+	if err != nil {
+		refreshExpiry = 24 * time.Hour
+	}
+
 	// Create config with defaults and environment variable overrides
 	config := &Config{
 		Server: ServerConfig{
-			Port:              getEnv("PORT", "8081"),
-			RequestTimeoutSec: getIntEnv("REQUEST_TIMEOUT_SECONDS", 30),
+			Port:              v.GetString("PORT"),
+			RequestTimeoutSec: v.GetInt("REQUEST_TIMEOUT_SECONDS"),
 		},
 		Database: DatabaseConfig{
-			DSN: getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=auth_service port=5432 sslmode=disable TimeZone=UTC"),
+			DSN: v.GetString("DATABASE_URL"),
 		},
 		Email: EmailConfig{
-			FromEmail:     getEnv("EMAIL_FROM_ADDRESS", "noreply@quboolkallyaanam.com"),
-			FromName:      getEnv("EMAIL_FROM_NAME", "Qubool Kallyaanam"),
-			OTPExpiryMins: getIntEnv("OTP_EXPIRY_MINS", 15),
-			IsDevelopment: getEnv("APP_ENV", "development") == "development",
+			FromEmail:     v.GetString("EMAIL_FROM_ADDRESS"),
+			FromName:      v.GetString("EMAIL_FROM_NAME"),
+			OTPExpiryMins: v.GetInt("OTP_EXPIRY_MINS"),
+			IsDevelopment: v.GetString("APP_ENV") == "development",
 		},
 		OTP: OTPConfig{
-			Length:     getIntEnv("OTP_LENGTH", 6),
-			ExpiryMins: getIntEnv("OTP_EXPIRY_MINS", 15),
+			Length:     v.GetInt("OTP_LENGTH"),
+			ExpiryMins: v.GetInt("OTP_EXPIRY_MINS"),
 		},
 		Security: SecurityConfig{
-			BcryptCost:       getIntEnv("BCRYPT_COST", 12),
-			MinPasswordChars: getIntEnv("MIN_PASSWORD_CHARS", 8),
+			BcryptCost:                   v.GetInt("BCRYPT_COST"),
+			MinPasswordChars:             v.GetInt("MIN_PASSWORD_CHARS"),
+			JWTSecret:                    v.GetString("JWT_SECRET"),
+			AccessTokenExpiryMinutes:     v.GetInt("ACCESS_TOKEN_EXPIRY_MINUTES"),
+			RefreshTokenExpiryHours:      v.GetInt("REFRESH_TOKEN_EXPIRY_HOURS"),
+			TokenIssuer:                  v.GetString("TOKEN_ISSUER"),
+			LoginAttemptsThreshold:       v.GetInt("LOGIN_ATTEMPTS_THRESHOLD"),
+			LoginThrottleDurationMinutes: v.GetInt("LOGIN_THROTTLE_DURATION_MINUTES"),
 		},
 		RateLimiting: RateLimitingConfig{
-			MaxRequestsPerMinute: getIntEnv("RATE_LIMIT_MAX_REQUESTS", 5),
-			BlockDurationMinutes: getIntEnv("RATE_LIMIT_BLOCK_DURATION", 30),
+			MaxRequestsPerMinute: v.GetInt("RATE_LIMIT_MAX_REQUESTS"),
+			BlockDurationMinutes: v.GetInt("RATE_LIMIT_BLOCK_DURATION"),
 		},
 		Logging: LoggingConfig{
-			IsDevelopment: getEnv("APP_ENV", "development") == "development",
-			LogLevel:      getEnv("LOG_LEVEL", "info"),
+			IsDevelopment: v.GetString("APP_ENV") == "development",
+			LogLevel:      v.GetString("LOG_LEVEL"),
 		},
 		Redis: redisConfig,
+		JWT: JWTConfig{
+			Secret:        v.GetString("JWT_SECRET"),
+			TokenExpiry:   tokenExpiry,
+			RefreshExpiry: refreshExpiry,
+			Issuer:        v.GetString("JWT_ISSUER"),
+		},
 	}
 
 	// Validate the configuration
@@ -332,14 +446,8 @@ func NewConfig() (*Config, error) {
 	return config, nil
 }
 
-// LoadConfig loads configuration from environment variables with validation
-func LoadConfig() (*Config, error) {
-	config, err := NewConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-	return config, nil
-}
+// Helper functions below are kept for backward compatibility
+// but will be deprecated in favor of Viper
 
 // Helper function to get an environment variable with a fallback value
 func getEnv(key, fallback string) string {

@@ -15,7 +15,9 @@ type UserRepository interface {
 	FindUserByPhone(ctx context.Context, phone string) (bool, error)
 	FindPendingRegistrationByEmail(ctx context.Context, email string) (bool, error)
 	FindPendingRegistrationByPhone(ctx context.Context, phone string) (bool, error)
-
+	FindByEmail(ctx context.Context, email string) (*model.User, error)
+	Update(ctx context.Context, user *model.User) error
+	FindByID(ctx context.Context, id string) (*model.User, error)
 	GetPendingRegistrationByEmail(ctx context.Context, email string) (*model.PendingRegistration, error)
 	DeletePendingRegistration(ctx context.Context, id uuid.UUID) error
 	CreateUser(ctx context.Context, user *model.User) error

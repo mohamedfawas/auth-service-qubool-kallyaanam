@@ -15,8 +15,8 @@ FROM alpine:latest
 
 WORKDIR /app
 
-# Install required packages
-RUN apk --no-cache add ca-certificates
+# Install required packages including netcat
+RUN apk --no-cache add ca-certificates netcat-openbsd
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/authservice .

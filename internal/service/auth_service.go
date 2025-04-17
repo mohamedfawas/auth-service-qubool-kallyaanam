@@ -26,6 +26,7 @@ type authService struct {
 	securityService SecurityService
 	metricsService  MetricsService
 	logger          *logger.Logger
+	redisService    RedisService
 }
 
 // NewAuthService creates a new auth service instance
@@ -36,6 +37,7 @@ func NewAuthService(
 	securityService SecurityService,
 	metricsService MetricsService,
 	logger *logger.Logger,
+	redisService RedisService,
 ) AuthService {
 	return &authService{
 		userRepo:        userRepo,
@@ -44,6 +46,7 @@ func NewAuthService(
 		securityService: securityService,
 		metricsService:  metricsService,
 		logger:          logger,
+		redisService:    redisService,
 	}
 }
 
@@ -198,13 +201,16 @@ func (s *authService) VerifyEmail(ctx context.Context, req *dto.VerifyEmailReque
 	err = s.userRepo.WithTransaction(ctx, func(txCtx context.Context) error {
 		// Create user from pending registration
 		user := &model.User{
-			ID:        uuid.New(),
-			Email:     pendingReg.Email,
-			Phone:     pendingReg.Phone,
-			Password:  pendingReg.Password, // Password is already hashed
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-			IsActive:  true,
+			ID:           uuid.New(),
+			Email:        pendingReg.Email,
+			Phone:        pendingReg.Phone,
+			PasswordHash: pendingReg.Password, // Password is already hashed
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			IsActive:     true,
+			IsVerified:   true,
+			Role:         "user",
+			LastLoginAt:  time.Now(),
 		}
 
 		// Save user in database
@@ -268,4 +274,252 @@ func getRequestStartTime(ctx context.Context) time.Time {
 		return startTime
 	}
 	return time.Now() // Fallback
+}
+
+// Add to auth_service.go
+
+// Login authenticates a user and generates JWT tokens
+func (s *authService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.LoginResponse, error) {
+	// Extract client info
+	clientIP, _ := ctx.Value("client_ip").(string)
+	userAgent, _ := ctx.Value("user_agent").(string)
+
+	// Check if login attempts are throttled for this IP
+	isThrottled, err := s.redisService.IsLoginThrottled(ctx, clientIP)
+	if err != nil {
+		s.logger.Error("Error checking login throttling",
+			s.logger.Field("client_ip", clientIP),
+			s.logger.Field("error", err.Error()))
+		// Continue processing in case of error
+	}
+
+	if isThrottled {
+		return nil, errors.New("too many login attempts")
+	}
+
+	// Find user by email
+	user, err := s.userRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
+		// Log error but return generic message to user
+		s.logger.Error("Error finding user during login",
+			s.logger.Field("email", req.Email),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("invalid credentials")
+	}
+
+	// Check if user exists
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+
+	// Check if email is verified
+	if !user.IsVerified {
+		return nil, errors.New("email not verified")
+	}
+
+	// Verify password
+	if !s.securityService.VerifyPassword(ctx, user.PasswordHash, req.Password) {
+		// Add delay to prevent timing attacks
+		time.Sleep(300 * time.Millisecond)
+		return nil, errors.New("invalid credentials")
+	}
+
+	// Generate JWT token
+	accessToken, err := s.securityService.GenerateJWT(ctx, user.ID.String(), user.Role, user.LastLoginAt)
+	if err != nil {
+		s.logger.Error("Error generating JWT token",
+			s.logger.Field("user_id", user.ID.String()),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to generate access token")
+	}
+
+	// Generate refresh token
+	refreshToken, tokenID, err := s.securityService.GenerateRefreshToken(ctx, user.ID.String())
+	if err != nil {
+		s.logger.Error("Error generating refresh token",
+			s.logger.Field("user_id", user.ID.String()),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to generate refresh token")
+	}
+	// Store refresh token in Redis
+	tokenData := TokenData{
+		UserID:    user.ID.String(),
+		TokenID:   tokenID,
+		UserRole:  user.Role,
+		IssuedAt:  time.Now(),
+		UserAgent: userAgent,
+		ClientIP:  clientIP,
+	}
+
+	if err := s.redisService.StoreRefreshToken(ctx, tokenID, refreshToken, tokenData); err != nil {
+		s.logger.Error("Error storing refresh token",
+			s.logger.Field("user_id", user.ID.String()),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to store refresh token")
+	}
+
+	// Store login history
+	if err := s.redisService.StoreLoginHistory(ctx, user.ID.String(), userAgent, clientIP); err != nil {
+		// Log but don't fail the login
+		s.logger.Warn("Failed to store login history",
+			s.logger.Field("user_id", user.ID.String()),
+			s.logger.Field("error", err.Error()))
+	}
+
+	// Update last login time
+	user.LastLoginAt = time.Now()
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		// Log error but continue - this shouldn't block login
+		s.logger.Warn("Failed to update last login time",
+			s.logger.Field("user_id", user.ID.String()),
+			s.logger.Field("error", err.Error()))
+	}
+
+	// Return response
+	return &dto.LoginResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		UserRole:     user.Role,
+	}, nil
+}
+
+func (s *authService) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.RefreshTokenResponse, error) {
+	// Extract token ID
+	tokenID, err := s.securityService.ExtractTokenID(ctx, req.RefreshToken)
+	if err != nil {
+		return nil, errors.New("invalid refresh token")
+	}
+
+	// Get token data from Redis
+	tokenData, err := s.redisService.GetRefreshTokenData(ctx, tokenID)
+	if err != nil {
+		s.logger.Error("Error retrieving refresh token data",
+			s.logger.Field("token_id", tokenID),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to validate refresh token")
+	}
+
+	// Check if token exists
+	if tokenData == nil {
+		return nil, errors.New("refresh token not found or expired")
+	}
+
+	// Verify token hasn't been blacklisted
+	isBlacklisted, err := s.redisService.IsTokenBlacklisted(ctx, tokenID)
+	if err != nil {
+		s.logger.Error("Error checking token blacklist",
+			s.logger.Field("token_id", tokenID),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to validate refresh token")
+	}
+
+	if isBlacklisted {
+		return nil, errors.New("refresh token has been revoked")
+	}
+
+	// Delete the used refresh token (token rotation)
+	if err := s.redisService.DeleteRefreshToken(ctx, tokenID); err != nil {
+		s.logger.Error("Error deleting used refresh token",
+			s.logger.Field("token_id", tokenID),
+			s.logger.Field("error", err.Error()))
+		// Continue despite error
+	}
+
+	// Get user to ensure they still exist and are active
+	userID := tokenData.UserID
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		s.logger.Error("Error finding user during token refresh",
+			s.logger.Field("user_id", userID),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to validate user")
+	}
+
+	if user == nil || !user.IsActive {
+		return nil, errors.New("user not found or inactive")
+	}
+
+	// Generate new access token
+	accessToken, err := s.securityService.GenerateJWT(ctx, userID, tokenData.UserRole, user.LastLoginAt)
+	if err != nil {
+		s.logger.Error("Error generating access token",
+			s.logger.Field("user_id", userID),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to generate access token")
+	}
+
+	// Generate new refresh token (rotation)
+	newRefreshToken, newTokenID, err := s.securityService.GenerateRefreshToken(ctx, userID)
+	if err != nil {
+		s.logger.Error("Error generating new refresh token",
+			s.logger.Field("user_id", userID),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to generate refresh token")
+	}
+
+	// Store new refresh token
+	newTokenData := TokenData{
+		UserID:    userID,
+		TokenID:   newTokenID,
+		UserRole:  tokenData.UserRole,
+		IssuedAt:  time.Now(),
+		UserAgent: tokenData.UserAgent,
+		ClientIP:  tokenData.ClientIP,
+	}
+
+	if err := s.redisService.StoreRefreshToken(ctx, newTokenID, newRefreshToken, newTokenData); err != nil {
+		s.logger.Error("Error storing new refresh token",
+			s.logger.Field("user_id", userID),
+			s.logger.Field("error", err.Error()))
+		return nil, errors.New("failed to store refresh token")
+	}
+
+	return &dto.RefreshTokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: newRefreshToken,
+	}, nil
+}
+
+// Add Logout method
+func (s *authService) Logout(ctx context.Context, req *dto.LogoutRequest) error {
+	// Extract token ID from access token
+	accessTokenID, err := s.securityService.ExtractTokenID(ctx, req.AccessToken)
+	if err != nil {
+		return errors.New("invalid access token")
+	}
+
+	// Extract token ID from refresh token
+	refreshTokenID, err := s.securityService.ExtractTokenID(ctx, req.RefreshToken)
+	if err != nil {
+		return errors.New("invalid refresh token")
+	}
+
+	// Delete refresh token
+	if err := s.redisService.DeleteRefreshToken(ctx, refreshTokenID); err != nil {
+		s.logger.Error("Error deleting refresh token during logout",
+			s.logger.Field("token_id", refreshTokenID),
+			s.logger.Field("error", err.Error()))
+		// Continue despite error
+	}
+
+	// Blacklist access token until it expires
+	accessTokenClaims, err := s.securityService.ValidateJWT(ctx, req.AccessToken)
+	if err == nil { // Only blacklist if token is valid
+		// Extract expiry time
+		expUnix, ok := accessTokenClaims["exp"].(float64)
+		if ok {
+			exp := time.Unix(int64(expUnix), 0)
+			ttl := time.Until(exp)
+
+			// Blacklist the token
+			if err := s.redisService.BlacklistToken(ctx, accessTokenID, ttl); err != nil {
+				s.logger.Error("Error blacklisting access token",
+					s.logger.Field("token_id", accessTokenID),
+					s.logger.Field("error", err.Error()))
+				// Continue despite error
+			}
+		}
+	}
+
+	return nil
 }

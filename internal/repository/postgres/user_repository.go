@@ -165,3 +165,45 @@ func (r *UserRepository) WithTransaction(ctx context.Context, fn func(txCtx cont
 
 	return nil
 }
+
+// FindByEmail finds a user by email
+func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
+	var user model.User
+
+	result := r.db.WithContext(ctx).Where("email = ?", email).First(&user)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, nil // User not found
+		}
+		return nil, result.Error
+	}
+
+	return &user, nil
+}
+
+// UpdateUser updates user information
+func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
+	result := r.db.WithContext(ctx).Save(user)
+	return result.Error
+}
+
+// FindByID finds a user by ID
+func (r *UserRepository) FindByID(ctx context.Context, id string) (*model.User, error) {
+	var user model.User
+
+	// Convert string ID to UUID if needed
+	uuid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID format: %w", err)
+	}
+
+	result := r.db.WithContext(ctx).Where("id = ?", uuid).First(&user)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, nil // User not found
+		}
+		return nil, result.Error
+	}
+
+	return &user, nil
+}
